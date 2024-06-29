@@ -1,0 +1,164 @@
+---
+title: "in_silico_digest"
+author: "Chandler Sutherland"
+date: "2024-05-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Chandler Sutherland
+
+Copyright (c) Chandler Sutherland Email: chandlersutherland@berkeley.edu
+
+Purpose: check in silico digestion of A. thaliana genome with RE (or combinations of RE) using DECIPHER. 
+
+From Abascal 2021: "We identified 14 commercially-available restriction endonucleases with 4 base-pair recognition sites that generated 5′ overhangs or blunt ends and were not impaired by overlapping CpG methylation. We computationally digested the human genome (hs37d5) with each restriction enzyme and, assuming size selection of fragments between 250 and 500 base pairs and 150 bp paired-end reads, calculated the coverage for the whole genome, the coding genome and the mitochondrial genome (Supplementary Table 3). The candidates with the highest coverage included AluI, CviAII, FatI, and HpyCH4V, of which only AluI and HpyCH4V leave blunt ends. All four enzymes have a recognition site with 50% GC content. We opted for HpyCH4V given its higher whole-genome and coding coverages, although its mitochondrial coverage was lower than that of AluI" 
+
+RE table from Abascal 2021 supp table 3: 
+Restriction enzyme	Restriction site	Nuclear genome	% cov	Coding sequences	% cov	Mitochondrial genome	% cov
+AluI	AGCT     	 810,043,421 	27.0	 9,990,036 	28.3	 4,171 	26.1
+BfaI	CTAG     	 546,344,998 	18.2	 5,205,874 	14.7	 5,527 	34.5
+CviAII	CATG     	 810,011,070 	27.0	 9,490,545 	26.9	 2,061 	12.9
+CviJI*	RGCY, RGCR, YGCR	 60,139,430 	2.0	 256,061 	0.7	 NA 	NA
+CviKI-1	RGCY	 433,565,956 	14.5	 2,780,668 	7.9	 586 	3.7
+CviQI	GTAC    	 321,512,873 	10.7	 4,307,494 	12.2	 840 	5.3
+DpnII	GATC     	 510,329,959 	17.0	 6,202,629 	17.6	 877 	5.5
+FatI	CATG     	 810,011,070 	27.0	 9,490,545 	26.9	 2,061 	12.9
+HaeIII	GGCC     	 445,692,040 	14.9	 5,673,040 	16.1	 2,655 	16.6
+HpyCH4V	TGCA	 862,397,747 	28.7	 9,886,638 	28.0	 1,739 	10.9
+MluCI	AATT     	 690,934,232 	23.0	 6,355,541 	18.0	 3,493 	21.8
+MseI	TTAA     	 705,362,365 	23.5	 6,117,438 	17.3	 4,474 	28.0
+MspI	CCGG     	 83,530,412 	2.8	 3,314,212 	9.4	 1,800 	11.3
+TaqI	TCGA     	 53,681,028 	1.8	 1,474,987 	4.2	 1,428 	8.9
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(DECIPHER)
+```
+```{r}
+rapyds_res <- read_csv('re_results_rapyds.csv')
+nuc_summ <- rapyds_res %>% mutate(chrom_type=case_when(chromosome %in% c('Chr1', 'Chr2', 'Chr3', 'Chr4', 'Chr5') ~ 'nuclear', 
+                                           .default = as.character(chromosome))) %>%
+  filter(chrom_type=='nuclear')%>%
+  group_by(Enzyme) %>% 
+  summarize(nuc_coverage=mean(coverage))
+
+chrC <- rapyds_res %>% filter(chromosome=='ChrC')%>%
+  group_by(Enzyme) %>% 
+  summarize(chrC_coverage=mean(coverage))
+
+chrM <- rapyds_res %>% filter(chromosome=='ChrM')%>%
+  group_by(Enzyme) %>% 
+  summarize(chrM_coverage=mean(coverage))
+
+result_summary <- merge(nuc_summ, chrC) %>% merge(chrM)
+
+result_summary %>% arrange(desc(nuc_coverage))
+
+front_runners <- rapyds_res %>% filter(Enzyme %in% c('HaeIII', 'MspI', 'CviQI'))
+```
+
+
+```{r}
+ggplot(front_runners)+
+  geom_point(aes(x=chromosome, y=coverage, color=Enzyme))+
+  ylim(0, 40)
+```
+Create binned chromosome coverage plots from bed files from top 5 candidates from custom seq pipeline 
+AluI
+CviAII
+FatI
+HpyCH4V
+MseI 
+```{r}
+#load bed file 
+alu1_bed <- read_tsv("//wsl.localhost//Ubuntu//home//chandlersutherland//e19_scratch//re_digest//AluI.bed", 
+                     col_names=c('chrom', 'start', 'stop', 'frag')) %>%
+  mutate(midpoint=(stop-start)/2+start) %>%
+  mutate(enzyme='AluI')
+
+CviAII_bed <- read_tsv("//wsl.localhost//Ubuntu//home//chandlersutherland//e19_scratch//re_digest//CviAII.bed", 
+                     col_names=c('chrom', 'start', 'stop', 'frag')) %>%
+  mutate(midpoint=(stop-start)/2+start) %>%
+  mutate(enzyme='CviAII')
+
+FatI_bed <- read_tsv("//wsl.localhost//Ubuntu//home//chandlersutherland//e19_scratch//re_digest//FatI.bed", 
+                     col_names=c('chrom', 'start', 'stop', 'frag')) %>%
+  mutate(midpoint=(stop-start)/2+start) %>%
+  mutate(enzyme='FatI')
+
+HpyCH4V_bed <- read_tsv("//wsl.localhost//Ubuntu//home//chandlersutherland//e19_scratch//re_digest//HpyCH4V.bed", 
+                     col_names=c('chrom', 'start', 'stop', 'frag')) %>%
+  mutate(midpoint=(stop-start)/2+start) %>%
+  mutate(enzyme='HpyCH4V')
+
+MseI_bed <- read_tsv("//wsl.localhost//Ubuntu//home//chandlersutherland//e19_scratch//re_digest//MseI.bed", 
+                     col_names=c('chrom', 'start', 'stop', 'frag')) %>%
+  mutate(midpoint=(stop-start)/2+start) %>%
+  mutate(enzyme='MseI')
+
+enzymes <- bind_rows(alu1_bed, CviAII_bed, FatI_bed, HpyCH4V_bed, MseI_bed)
+not_nuc <- enzymes %>% filter(chrom %in% c('chloroplast', 'mitochondria'))
+nuc <- enzymes %>% filter(!(chrom %in% c('chloroplast', 'mitochondria')))
+
+ggplot(data=nuc, aes(x=midpoint))+
+  geom_histogram()+
+  facet_grid(enzyme~chrom, scales='free_x')
+
+
+ggplot(data=not_nuc, aes(x=midpoint))+
+  geom_histogram()+
+  facet_grid(enzyme~chrom, scales='free_x')
+
+```
+```{r}
+#investigate fragment distribution of HpyCH4V_bed 
+frag_HpyCH4V <- HpyCH4V_bed %>% mutate(frag_length=stop-start)
+HpyCH4V_bed %>% mutate(frag_length=stop-start) %>% pull(frag_length) %>% sum()
+
+ggplot(frag_HpyCH4V)+
+  geom_histogram(aes(x=frag_length))+
+  geom_vline(aes(xintercept=mean(frag_length)), color='red')+
+  geom_vline(aes(xintercept=median(frag_length)), color='blue')+
+  theme_classic()
+```
+
+
+Repeat for 150bp reads 
+
+```{r}
+#load bed file 
+seq_paths <- Sys.glob("//wsl.localhost//Ubuntu//home//chandlersutherland//e19_scratch//re_digest//*_seq.bed")
+
+import <- function(path){
+  int <- path %>% str_split_1('//') %>% last() %>% str_split_1('_')
+  enzyme <- int[[1]]
+  
+  bed <- read_tsv(path, col_names=c('chrom', 'start', 'stop', 'frag')) %>%
+  mutate(midpoint=(stop-start)/2+start) %>%
+  mutate(enzyme=enzyme)
+  
+  return(bed)
+}
+
+output <- lapply(seq_paths, import)
+
+enzymes <- bind_rows(output)
+not_nuc <- enzymes %>% filter(chrom %in% c('chloroplast', 'mitochondria'))
+nuc <- enzymes %>% filter(!(chrom %in% c('chloroplast', 'mitochondria')))
+
+ggplot(data=nuc, aes(x=midpoint))+
+  geom_histogram()+
+  facet_grid(enzyme~chrom, scales='free_x')
+
+
+ggplot(data=not_nuc, aes(x=midpoint))+
+  geom_histogram()+
+  facet_grid(enzyme~chrom, scales='free_x')
+```
+
+
