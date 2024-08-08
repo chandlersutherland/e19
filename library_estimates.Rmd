@@ -3,27 +3,30 @@ title: "library_prep_simulation"
 author: "Chandler Sutherland"
 date: "2024-06-25"
 output: html_document
-editor_options: 
-  markdown: 
-    wrap: 72
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-Goal: simulate/back of envelope calculation of library preparation and
-complexity; estimate how much library to load for desired coverage 
+```{r}
+require(tidyverse)
+```
 
-# Library Preparation
+Goal: estimate how much to sequence each library for desired coverage
+
+
+# Library Preparation 
 
 moles dsDNA (mol) = mass of dsDNA (g)/((length of dsDNA (bp) x 615.96
-g/mol/bp) + 36.04 g/mol) moles of dsDNA ends = moles dsDNA (mol) x 2 DNA
+g/mol/bp) + 36.04 g/mol) 
+
+moles of dsDNA ends = moles dsDNA (mol) x 2 DNA
 copy number = moles of dsDNA x 6.022e23 molecules/mol
 
 ```{r}
 #define variables 
-input <- 15 #input dna ng
+input <- 50 #input dna ng
 length <- 22.5e+3 #input dna length bp 
 
 moles_input <- input*1e-9/((length*615.96 + 36.04)) #how many moles of DNA input 
@@ -31,7 +34,9 @@ DNA_copy <- moles_input*6.02e+23 #what is the number of DNA molecules
 ```
 
 ## Fragmentation
+
 Digesting with HpyCHV
+
 ```{r}
 #still 5ng of DNA.... 
 frag_length <- 350  #this I will test empirically once RE comes 
@@ -74,17 +79,22 @@ amplified using platform specific qPCR primers that target adapter
 sequences
 
 DNA copy number = moles of dsDNA x 6.022e23 molecules/mol
+
 ```{r}
 correction_factor <- 1.5 
 recommended_input <- 0.6 #fmol 
 #coverage <- 26 
 #read_pairs <- 26e+6
 
-average_fragment_len <- 573 #this I need to check with bioanalyzer or something 
+average_fragment_len <- 524 #this I need to check with bioanalyzer or something 
 #moles_input <- recommended_input*1e-15/((average_fragment_len*615.96 + 36.04))
 DNA_copy_input <- recommended_input*1e-15*6.02e+23
 print(format(DNA_copy_input, scientific=T))
 ```
+
+# Coverage Calculations 
+
+First, compare the genome sizes
 
 ```{r}
 At_genome <- 135e+6 #haploid genome of 135Mb 
@@ -96,20 +106,24 @@ ideal_bp/(Hs_genome*0.27) #sequenceable space is 3.7% of human sequenceable spac
 #rough estimate is everything should be 40% of human genome estimate 
 ```
 
-Coverage Equation The Lander/Waterman equation is a method for computing
-coverage1 . The general equation is: C = LN / G 
+The Arabidopsis genome is 4% of the human genome, and our coverage using
+HpyCHV is 3.7% of the human sequenceable genome.
 
-• C stands for coverage
-• G is the haploid genome length 
-• L is the read length 
-• N is the number of reads 
+## Coverage Equation
 
-So, if we take one lane of single read human sequence
-with v3 chemistry, we get C = (100 bp)\*(189×106)/(3×109 bp) = 6.3 This
-tells us that each base in the genome will be sequenced between six and
-seven times on average.
+The Lander/Waterman equation is a method for computing coverage. The
+general equation is: C = LN / G
+
+• C stands for coverage • G is the haploid genome length • L is the read
+length • N is the number of reads
+
+So, if we take one lane of single read human sequence with v3 chemistry,
+we get C = (100 bp)\*(189×106)/(3×109 bp) = 6.3 This tells us that each
+base in the genome will be sequenced between six and seven times on
+average.
 
 ```{r}
+#start with a basic human and arabidopsis whole genome sequencing after genome fragmentation. How many reads to get to 30x coverage? 
 
 L <- 300 #(2x150)
 G <- ideal_bp #sequenceable part of the genome after fragmentation 
@@ -117,200 +131,55 @@ C <- 30 #30x coverage
 
 
 #At
-N <- C*G/L
-print(paste('number of reads for At:', as.character(format(N, scientific=T)))) #3 million reads required for 1 sample at 30x coverage 
+At_N <- C*G/L
+print(paste('number of reads for At WGS:', as.character(format(N, scientific=T)))) #3 million reads required for 1 sample at 30x coverage 
 
 #Hs
 Hs_N <- (C*Hs_genome*0.27)/L
-print(paste('number of reads for Hs:', as.character(format(Hs_N, scientific=T))))
+print(paste('number of reads for Hs WGS:', as.character(format(Hs_N, scientific=T))))
 
 N/Hs_N
 ```
-However, this is for regular sequencing coverage, which is not exactly what we are going for. Nanoseq coverage is higher. 
 
+However, this is for regular sequencing coverage, which is not exactly
+what we are going for. Nanoseq coverage is higher.
 
-A GB of reads refers to the computer storage it would require to store
-the reads.
-
-A file of size 1 gb will have 1,073,741,824 characters and the typycal
-read storing file (fastq) contains 4 lines per read, of which 3 lines
-store the main characters.
-
-Now assuming a read length of 150 bases, each read in the file will have
-150 bases + 150 quality scores + approx 15 characters to define the
-read + 1 (+) + 4 new line characters = approx 320 characters per read.
-
-No of reads in a 1GB file = 3,355,443 (approx).
-
-You can calculate similarly according to the read length that you have
-in your file.
-
-Then the number of reads that you have with your specific reads in a GB
-factor to convert your reads to GB.
-
-Duplicate nonsense:
+Overall, we found that 30× of standard sequencing output (300 × 10\^6
+150 bp paired-end reads) yielded approximately 3 Gb of high-accuracy
+duplex coverage (a haploid genome equivalent) after application of all
+computational filters.
 
 ```{r}
-#r: sequence ratio. ratio between the # of sequenced reads and number of amplifiable DNA fragments in the original library
-#reported 10**8 amplifiable DNA molecules 
-#f approximately equated to 1e8 fragments per fmol library 
-
-#N/(fmol_input*f)
-r <- 300e+6/(0.6*1e8) #optimal is 5.1 sequenced reads/original read 
-
-#d: duplicate rate, fraction of reads that are duplicate copies
-d <- 1-(1-exp(-r))/r
-
-#getting really high dupilcate rate/r estimates. Empirical distribution of fragments will be really helpful. 
-```
-
-The f term is what is different between me and human. It was determined empirically: 
-"f is the number of DNA fragments per fmol of library (referring specifically to ligated and amplifiable fragments within the size-selection range). Using an initial set of libraries, we compared a range of library inputs (fmol) to the estimated number of unique molecules in the library inferred from the sequencing data (using Piccard’s software). This analysis revealed that, for our choice of restriction enzyme and size-selection conditions, f approximately equated to 10^8 fragments per fmol."
-
-```{r}
-#replicate human estimate analytically, compare to empirical
-f_hs_analytical <- DNA_copy_input/0.6
-f_hs_empirical <- 10**8
-
-f_hs_analytical/f_hs_empirical
-```
-
-
-
-
-let's get fancy
-
-Efficiency of a duplex sequencing library (E) is the ratio between the
-number of base pairs with duplex coverage (bundles with reads from both
-strands) and the number of base pairs sequenced. This can be modelled
-as:
-
-\$E=\\frac{P{\\left(x\\ge 2;\\frac{r}{2}\\right)}\^{2}}{m}\\ \$
-
-Numerator: probability of a read bundle having at least two reads from
-both strands (usable bundles), based on the zero-truncated Poisson
-distribution, and the denominator is the sequence investment in each
-read bundle (average read bundle size).
-
-```{r}
-###########################################################################################
-## Simulations to estimate the optimal bottleneck size given an estimate of 
-## library complexity.
-## Equations below are assuming 1 fmol sequenced equates to 1e8 molecules
-## The relationship between fmol and molecules was derived empirically (see next section)
-###########################################################################################
-
-# Truncated Poisson (only defined for x>=1): this models the duplicate family size distribution
-dpoistrunc = function(x, lambda) {
-	    d = dpois(x, lambda) / (1-dpois(0, lambda))
-	    d[x==0] = NA
-	    return(d)
-	}
-	
-# The mean sequencing cost of a family is the mean of the zero-truncated Poisson: 
-#  lambda/(1-exp(-lambda))
-	
-# Efficiency: The fraction of families of size>=2 divided by the average size (i.e. 
-# sequencing cost) of a family, squared (as we need coverage from both strands)
-	
-ratio = seq(0,20,by=0.1) # Sequencing output / library complexity
-	
-efficiency = (ppois(q=2-0.1, lambda=ratio/2, lower.tail=F)/(1-dpois(0, ratio/2)))^2 / (ratio/(1-exp(-ratio)))
-	
-# Duprate can be simply calculated using the mean of the family size (from the zero-truncated 
-#  Poisson): 1-1/mean = 1-(1-exp(-r))/r
-duprate = 1-(1-exp(-ratio))/ratio
-	
-dev.new(width=9, height=3)
-par(mfrow=c(1,3))
-	
-plot(ratio, duprate, ylim=c(0,1), type="l", xlab="Seq ratio (sequencing yield / lib complexity)", ylab="Duplicate rate", las=1)
-abline(h=1, lty=2)
-#lines(ratio, pmax(0, 1-1/ratio), col="palegreen3", lty=2) # Simplistic expectation (ratio=10 would tend to yield ~90% duplicate rates)
-	
-plot(duprate, efficiency, type="l", xlim=c(0,1), xlab="Duplicate rate", ylab="Efficiency (duplex bp / total bp)", las=1)
-opt_duprate = duprate[which.max(efficiency)] # Optimal duplicate rate appears to be 0.805
-ind = which(efficiency > max(efficiency, na.rm=T)*0.8)
-abline(v=opt_duprate, col="red")
-abline(v=duprate[c(min(ind),max(ind))], col="red", lty=2)
-semiopt_duprate = duprate[c(min(ind),max(ind))]
-	
-plot(ratio, efficiency, type="l", xlab="Seq ratio (sequencing yield / lib complexity)", ylab="Efficiency (duplex bp / total bp)", las=1)
-opt_ratio = ratio[which.max(efficiency)] # Optimal duplicate rate appears to be 5.1
-ind = which(efficiency > max(efficiency, na.rm=T)*0.8)
-abline(v=opt_ratio, col="red")
-abline(v=ratio[c(min(ind),max(ind))], col="red", lty=2)
-semiopt_ratio = ratio[c(min(ind),max(ind))]
-```
-
-Optimal fmol
-
-${{\rm{fmol}}}\_{{\rm{opt}}}=\frac{N}{f\,{r}_{{\rm{opt}}}} $
-
-```{r}
-r_opt <- 5.1 
-f_opt <- 1e8 # f approximately equated to 10^8 fragments per fmol according to abascal estimates
-fmol <- 150e6/(r_opt*f_opt)
-fmol
-```
-
-Overall, we found that 30× of standard sequencing output (300 × 10^6 150 bp paired-end reads) yielded approximately 3 Gb of high-accuracy duplex coverage (a haploid genome equivalent) after application of all computational filters.
-
-```{r}
-#L <- 300 #(2x150)
-#G <- ideal_bp #sequenceable part of the genome after fragmentation 
-#G <- (Hs_genome*0.27)
-#C <- 30 #30x coverage 
-
-#N <- C*G/L
 standard_N <- 300e6
-#N/standard_N
-#print(paste('number of reads:', as.character(N))) #3 million reads required for 1 sample at 30x coverage 
-#almost exactly 1Gb 
-
-#standard_N*L/C
-
-#3*0.038
 
 C <- N*L/G
+
 standard_C <- standard_N*L/(Hs_genome) #just regular sequencing of whole human genome 
 Nano_standard_C <- standard_N*L/(Hs_genome*.27) #regular sequencing of reduced space 
-standard_C/Nano_standard_C #nanoseq requires about as much more sequencing to overcome 
+print(paste('Coverage of a human Nanoseq run:', Nano_standard_C))
 N_hs <- Nano_standard_C*(Hs_genome*.27)/L
-print(format(N_hs, scientific =T)) #272 million reads ~ 300 million reads for one sample 
+print(paste('Number of reads in a human Nanoseq run:', format(N_hs, scientific =T))) #272 million reads ~ 300 million reads for one sample 
 
 #At
-At_C <- standard_N*L/At_genome
-Nano_At_C <- standard_N*L/ideal_bp
-At_C/Nano_At_C
-
-N_At <- Nano_standard_C*ideal_bp/L
+N_At <- Nano_standard_C*ideal_bp/L #using the human nanoseq coverage, calculate required reads to achieve comprable coverage 
 print(format(N_At, scientific=T)) #11 million reads per sample 
 
-N_At/N_hs #4%
+print(paste('The ratio of At to Hs Nanoseq reads is:', N_At/N_hs)) #4%
 ```
 
-300 mil 150bp reads yields 3GB Duplex data 
-12 mil 150bp reads for 1GB Duplex data --> equivalent nucletide space coverage 
-```{r}
-novaseq_lane <- 1.25e9 #reads per novaseq lane 
-novaseq_price_qb3 <- 2000
-novaseq_lane/N_hs
-novaseq_lane/N_At
-novaseq_price_qb3/(novaseq_lane/N_At)
-```
+# Col-0 pilot project
 
+Novogene's smallest bucket is 166M reads, or 50G of data
 
-Col-0 pilot project
 ```{r}
 samples <- 6 
 
 N_At 
 
-
 #matched normal: *equivalent* of 8x human whole genome sequencing coverage 
 N_human_8x <- 8*Hs_genome/L
 N_At_8x <- 8*At_genome/L
+print(paste('One matched At normal requires', format(N_At_8x), 'reads.'))
 
 pilot_read_space <- samples*N_At*2 + samples*N_At_8x
 print(paste(format(pilot_read_space, scientific=T), 'reads required for At pilot')) #118 million reads
@@ -331,34 +200,5 @@ print(paste('Gb for one nanoseq sample:', Gb_At))
 print(paste('Gb for one matched normal:', Gb_At_normal))
 
 #round up to get to 50Gb 
-sum(3.5*samples*2+1.2*samples)
+sum(3.5*samples*2+1.3*samples)
 ```
-
-From Apoorva at Novaseq: 
-~166M paired reads (PE150) is the smallest bucket 
-C = LN / G 
-```{r}
-pilot_read_space/1e6
-N_At/1e6
-format(N_At, scientific=T)
-format(N_At_8x, scientific=T)
-
-L*3.6e6/ideal_bp
-```
-
-
-Ok, so what's the range I am after 
-```{r}
-#0.2-1.4? 
-#recommended input: 0.6, so this would be a correction factor of 0.3x-2.3x
-correction_factor <- c(0.75, 1, 1.25, 1.5, 1.75, 2)
-input_range <- correction_factor*0.6 #fmol
-print('range of fmol inputs:')
-print(input_range)
-input_range*6.02e+23
-input_range*10**8 #sequenced reads 
-
-#human: input of 0.6fmol sequenced to 300 mil reads --> 10**8 molecules per fmol input are actually sequenced 
-```
-
-
