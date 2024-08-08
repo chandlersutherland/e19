@@ -303,23 +303,58 @@ novaseq_price_qb3/(novaseq_lane/N_At)
 
 Col-0 pilot project
 ```{r}
-samples <- 8 
+samples <- 6 
+
+N_At 
 
 
-#matched normal: 8x human whole genome sequencing coverage 
+#matched normal: *equivalent* of 8x human whole genome sequencing coverage 
 N_human_8x <- 8*Hs_genome/L
 N_At_8x <- 8*At_genome/L
 
-pilot_read_space <- samples*N_At + 2*N_At_8x
-print(paste(format(pilot_read_space, scientific=T), 'reads required for At pilot')) #120 million reads
+pilot_read_space <- samples*N_At*2 + samples*N_At_8x
+print(paste(format(pilot_read_space, scientific=T), 'reads required for At pilot')) #118 million reads
 
 #do i really need a matched normal for each INDIVIDUAL? if they are the same genotype? Like no right? 
 ```
+
+```{r}
+#convert to Gb:
+print(paste('reads for one nanoseq sample:', format(N_At, scientific = T)))
+print(paste('reads for one matched normal:', format(N_At_8x, scientific = T)))
+
+#G of raw data = # of M raw read pairs * 0.3
+Gb_At <- (N_At*10**-6)*0.3
+Gb_At_normal <- (N_At_8x*10**-6)*0.3
+
+print(paste('Gb for one nanoseq sample:', Gb_At))
+print(paste('Gb for one matched normal:', Gb_At_normal))
+
+#round up to get to 50Gb 
+sum(3.5*samples*2+1.2*samples)
+```
+
+From Apoorva at Novaseq: 
+~166M paired reads (PE150) is the smallest bucket 
+C = LN / G 
+```{r}
+pilot_read_space/1e6
+N_At/1e6
+format(N_At, scientific=T)
+format(N_At_8x, scientific=T)
+
+L*3.6e6/ideal_bp
+```
+
+
 Ok, so what's the range I am after 
 ```{r}
 #0.2-1.4? 
 #recommended input: 0.6, so this would be a correction factor of 0.3x-2.3x
-input_range <- seq(0.2, 1.6, length=8) #fmol
+correction_factor <- c(0.75, 1, 1.25, 1.5, 1.75, 2)
+input_range <- correction_factor*0.6 #fmol
+print('range of fmol inputs:')
+print(input_range)
 input_range*6.02e+23
 input_range*10**8 #sequenced reads 
 
