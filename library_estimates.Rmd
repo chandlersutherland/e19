@@ -1,0 +1,204 @@
+---
+title: "library_prep_simulation"
+author: "Chandler Sutherland"
+date: "2024-06-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+require(tidyverse)
+```
+
+Goal: estimate how much to sequence each library for desired coverage
+
+
+# Library Preparation 
+
+moles dsDNA (mol) = mass of dsDNA (g)/((length of dsDNA (bp) x 615.96
+g/mol/bp) + 36.04 g/mol) 
+
+moles of dsDNA ends = moles dsDNA (mol) x 2 DNA
+copy number = moles of dsDNA x 6.022e23 molecules/mol
+
+```{r}
+#define variables 
+input <- 50 #input dna ng
+length <- 22.5e+3 #input dna length bp 
+
+moles_input <- input*1e-9/((length*615.96 + 36.04)) #how many moles of DNA input 
+DNA_copy <- moles_input*6.02e+23 #what is the number of DNA molecules 
+```
+
+## Fragmentation
+
+Digesting with HpyCHV
+
+```{r}
+#still 5ng of DNA.... 
+frag_length <- 350  #this I will test empirically once RE comes 
+
+moles_frag <- input*1e-9/((frag_length*615.96 + 36.04))
+DNA_copy <- moles_frag*6.02*1e23
+
+ideal_bp <- 33334727 #number of bp theoretically coverable by fragmented genome and size selection, will likely actually be smaller depending on DNA size to begin with and RE efficiency 
+rough_cov <- DNA_copy*frag_length #rough coverage: number of DNA molecules*average length
+```
+
+## A-tailing
+
+Single adenine base is added to form an overhang by an A-tailing
+reaction. This A overhang allows adapters containing a single thymine
+overhangning base to pair with the DNA fragments
+
+## Adapter ligation
+
+A ligase enzyme covalently links the adapter to the DNA fragments,
+making a complete library molecule. Barcodes containing UDIs are added.
+xGen Duplex Seq Adapters are the specific primers used in this case.
+These are truncated adapters that use a traditional ligation mechanism
+to attach Illumina adapter sequences to input molecules. Allowing the
+user to build libraries for NGS sequencing. However, the CS adapters
+aren't complete sequences and need indexing primers in PCR to complete
+the adapter structure. The xGen CS Adaptors are a stubby type adaptors
+containing in-line 3bp UMI's that can be attached by TA ligation to the
+insert. They are delivered as a pool which is normalized to 2 nmol and
+provided at a concentration of 15uM.
+
+The xGen CS Adaptors have standard TruSeq overhangs and are compatible
+with any TruSeq indexing primers. They are also compatible with our
+stocked xGen UDI primers. (Identical to lensing primers)
+
+## Library Quantification
+
+6 pre-diluted DNA standards and appropriately diluted NGS libraries are
+amplified using platform specific qPCR primers that target adapter
+sequences
+
+DNA copy number = moles of dsDNA x 6.022e23 molecules/mol
+
+```{r}
+correction_factor <- 1.5 
+recommended_input <- 0.6 #fmol 
+#coverage <- 26 
+#read_pairs <- 26e+6
+
+average_fragment_len <- 524 #this I need to check with bioanalyzer or something 
+#moles_input <- recommended_input*1e-15/((average_fragment_len*615.96 + 36.04))
+DNA_copy_input <- recommended_input*1e-15*6.02e+23
+print(format(DNA_copy_input, scientific=T))
+```
+
+# Coverage Calculations 
+
+First, compare the genome sizes
+
+```{r}
+At_genome <- 135e+6 #haploid genome of 135Mb 
+Hs_genome <- 3.3e+9 #haploid genome is 3.3 billion base pairs 
+
+At_genome/Hs_genome #At genome is 4% of human genome 
+ideal_bp/(Hs_genome*0.27) #sequenceable space is 3.7% of human sequenceable space 
+
+#rough estimate is everything should be 40% of human genome estimate 
+```
+
+The Arabidopsis genome is 4% of the human genome, and our coverage using
+HpyCHV is 3.7% of the human sequenceable genome.
+
+## Coverage Equation
+
+The Lander/Waterman equation is a method for computing coverage. The
+general equation is: C = LN / G
+
+• C stands for coverage • G is the haploid genome length • L is the read
+length • N is the number of reads
+
+So, if we take one lane of single read human sequence with v3 chemistry,
+we get C = (100 bp)\*(189×106)/(3×109 bp) = 6.3 This tells us that each
+base in the genome will be sequenced between six and seven times on
+average.
+
+```{r}
+#start with a basic human and arabidopsis whole genome sequencing after genome fragmentation. How many reads to get to 30x coverage? 
+
+L <- 300 #(2x150)
+G <- ideal_bp #sequenceable part of the genome after fragmentation 
+C <- 30 #30x coverage 
+
+
+#At
+At_N <- C*G/L
+print(paste('number of reads for At WGS:', as.character(format(N, scientific=T)))) #3 million reads required for 1 sample at 30x coverage 
+
+#Hs
+Hs_N <- (C*Hs_genome*0.27)/L
+print(paste('number of reads for Hs WGS:', as.character(format(Hs_N, scientific=T))))
+
+N/Hs_N
+```
+
+However, this is for regular sequencing coverage, which is not exactly
+what we are going for. Nanoseq coverage is higher.
+
+Overall, we found that 30× of standard sequencing output (300 × 10\^6
+150 bp paired-end reads) yielded approximately 3 Gb of high-accuracy
+duplex coverage (a haploid genome equivalent) after application of all
+computational filters.
+
+```{r}
+standard_N <- 300e6
+
+C <- N*L/G
+
+standard_C <- standard_N*L/(Hs_genome) #just regular sequencing of whole human genome 
+Nano_standard_C <- standard_N*L/(Hs_genome*.27) #regular sequencing of reduced space 
+print(paste('Coverage of a human Nanoseq run:', Nano_standard_C))
+N_hs <- Nano_standard_C*(Hs_genome*.27)/L
+print(paste('Number of reads in a human Nanoseq run:', format(N_hs, scientific =T))) #272 million reads ~ 300 million reads for one sample 
+
+#At
+N_At <- Nano_standard_C*ideal_bp/L #using the human nanoseq coverage, calculate required reads to achieve comprable coverage 
+print(format(N_At, scientific=T)) #11 million reads per sample 
+
+print(paste('The ratio of At to Hs Nanoseq reads is:', N_At/N_hs)) #4%
+```
+
+# Col-0 pilot project
+
+Novogene's smallest bucket is 166M reads, or 50G of data
+
+```{r}
+samples <- 6 
+
+N_At 
+
+#matched normal: *equivalent* of 8x human whole genome sequencing coverage 
+N_human_8x <- 8*Hs_genome/L
+N_At_8x <- 8*At_genome/L
+print(paste('One matched At normal requires', format(N_At_8x), 'reads.'))
+
+pilot_read_space <- samples*N_At*2 + samples*N_At_8x
+print(paste(format(pilot_read_space, scientific=T), 'reads required for At pilot')) #118 million reads
+
+#do i really need a matched normal for each INDIVIDUAL? if they are the same genotype? Like no right? 
+```
+
+```{r}
+#convert to Gb:
+print(paste('reads for one nanoseq sample:', format(N_At, scientific = T)))
+print(paste('reads for one matched normal:', format(N_At_8x, scientific = T)))
+
+#G of raw data = # of M raw read pairs * 0.3
+Gb_At <- (N_At*10**-6)*0.3
+Gb_At_normal <- (N_At_8x*10**-6)*0.3
+
+print(paste('Gb for one nanoseq sample:', Gb_At))
+print(paste('Gb for one matched normal:', Gb_At_normal))
+
+#round up to get to 50Gb 
+sum(3.5*samples*2+1.3*samples)
+```
