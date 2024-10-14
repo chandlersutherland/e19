@@ -187,8 +187,6 @@ def write_bed(selected_fragments, enzyme, chrom_name, entry_type):
 
 	infile.close()
 
-new_fragments=digest('AluI', genome[0])
-selected_fragments=size_selection(new_fragments, 250, 500)
 
 #simulate 150bp PE reads
 def write_illumina_fasta_forward(selected_fragments, enzyme, chrom_name):
@@ -226,8 +224,8 @@ def write_illumina_fasta_reverse(selected_fragments, enzyme, chrom_name):
 		#header includes arbitrary fragment #, Chr1, and then assigned index 
 		header='> '+'frag'+ str(i) + ' '+chrom_name+'\n'
 		seq=frag[0][-150:].translate(table)[::-1]+'\n'  #rev comp 
-		start=frag[1]
-		stop=frag[1]-149
+		stop=frag[2]
+		start=frag[2]-149
 		infile.write(header)
 		infile.write(seq)
 		reverse_read.append([seq.strip('\n'), start, stop])
@@ -236,7 +234,7 @@ def write_illumina_fasta_reverse(selected_fragments, enzyme, chrom_name):
 	print('finished reverse')
 	return reverse_read 
 
-len_genome=len(genome[0][1])
+
 #cov=perc_coverage(selected_fragments)
 
 #enzyme='AluI'
@@ -264,10 +262,10 @@ len_genome=len(genome[0][1])
 
 # output coverage file
 # columns: enzyme, chromosome, coverage 
-output_coverage='/global/scratch/users/chandlersutherland/e19/re_digest/'+enzyme+'/coverage.csv'
-cov_df=pd.DataFrame(cov_list)
-cov_df.columns = ['enzyme', 'chrom', 'cov']
-cov_df.to_csv(output_coverage, sep='\t')
+#output_coverage='/global/scratch/users/chandlersutherland/e19/re_digest/'+enzyme+'/coverage.csv'
+#cov_df=pd.DataFrame(cov_list)
+#cov_df.columns = ['enzyme', 'chrom', 'cov']
+#cov_df.to_csv(output_coverage, sep='\t')
 
 def wrapper(enzyme):
 	os.makedirs('/global/scratch/users/chandlersutherland/e19/re_digest/'+enzyme, exist_ok=True)
