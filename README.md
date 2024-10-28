@@ -1,7 +1,7 @@
 # e19
 library prep for somatic mutation sequencing 
 
-`re_simulation.py`: simulates digestion of genome, outputing a fasta file of fragments of the desired size, a corresponding bed file, and a .csv file with per chormosome coverage. Also an option to simulate 150PE reads on these fragments, outputing the actual sequenced reads is available. 
+`re_simulation.py`: simulates digestion of genome, outputing a fasta file of fragments of the desired size, and a corresponding bed file. Also an option to simulate 150PE reads on these fragments, outputing the actual sequenced reads is available. 
 
 `re_mapping.sh`: map simulated reads to the genome, and use samtools coverate to generate a .tsv file for the whole genome, the gene space, and NLRs specifically. 
 
