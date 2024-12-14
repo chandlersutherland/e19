@@ -1,0 +1,176 @@
+---
+title: "qpcr_concentration"
+author: "Chandler Sutherland"
+date: "2024-12-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(patchwork)
+library(readxl)
+```
+
+Goal: figure out if the issue was qpcr quantification of library or undersequencing 
+
+Load conglemerate concentration data 
+```{r}
+conc <- read_xlsx("pilot_troubleshooting.xlsx", sheet="qpcr_library_concentrations")%>% mutate(date=as.character(date))
+ul <- read_xlsx("pilot_troubleshooting.xlsx", sheet="ul_library")
+seq_output <- read_xlsx("pilot_troubleshooting.xlsx", sheet="sequencing_output")
+lib_qc <- read_xlsx("pilot_troubleshooting.xlsx", sheet="qc_report")
+complexity <- read_csv('pilot_complexity.csv') %>% subset(select=c(sample_name, library_complexity, fmol_input, NUM_READS_SEQUENCED, NUM_UNIQUE_READS, DUPLICATE_RATE, EFFICIENCY, library_type))
+```
+
+Start with analysis of the pre-amplification libraries, beginning with comparing multiple quantification methods: 
+```{r}
+ggplot(conc)+
+  geom_point(aes(x=library, y=nM, color=`quant_method`, shape=date))+
+  theme_classic()
+```
+Pretty tight bounds, with the exception of the most recent quibit quant, which I may discard. Generally expect quibit to be > qpcr, since it's including lose adapters and non-amplifiable sequences. KAPA is an overestimation, because it had non-specific DNA sequences amplifying. But not orders of magnitude wrong, which is key here. 
+
+How does this translate to the individual sequenced samples, specifically the fmol that moved forward to each one? Use each quantification method and the ul moved to the next step to calculate the `fmol_real` for each sample. Schrodinger's DNA concentration. 
+
+```{r}
+seqed <- merge(conc, ul, on='library') %>% mutate(fmol_real=nM*uL_added)
+
+result <- merge(seqed, complexity, on=sample_name) %>% filter(!(date == '20241211' & quant_method == 'quibit'))
+
+ggplot(result)+
+  geom_point(aes(x=sample_name, y=fmol_real, color=`quant_method`, shape=date))+
+  geom_hline(yintercept=0.6)+
+  geom_hline(yintercept=2)+
+  theme_classic()+
+  facet_wrap(~library_type, scales='free_x')
+
+ggplot(result)+
+  geom_point(aes(x=fmol, y=library_complexity, color=quant_method))+
+  facet_wrap(~quant_method, scales='free')
+```
+
+Quibit 12/11 discarded. Because these values were calculated on KAPA, they look the most normal. If anything, LESS library was moved forward to PCR than I expected/estimated, which should give the opposite problem. Hmmmm. Look at sequencing reads. 
+
+Let's play around with the relationship between library complexity and fmol input to PCR. 
+```{r}
+ggplot(result, aes(x=fmol_input, y=fmol_real))+
+  geom_point()
+
+result %>% filter(library_type=='Nanoseq') %>% ggplot(aes(x=fmol_real, y=library_complexity))+
+  geom_point(aes(color=library))+
+  facet_wrap(~quant_method)
+
+result %>% #filter(library_type=='Nanoseq') %>% 
+  ggplot(aes(x=fmol_real, y=library_complexity/NUM_READS_SEQUENCED))+
+  geom_point(aes(color=quant_method, shape=library_type))
+
+result %>% filter(library_type=='Nanoseq') %>% 
+  ggplot(aes(x=fmol_real, y=(NUM_READS_SEQUENCED-NUM_UNIQUE_READS)/NUM_READS_SEQUENCED))+
+  geom_point(aes(color=quant_method, shape=library_type))
+
+result %>% filter(library_type=='Nanoseq') %>% 
+  ggplot(aes(x=fmol_real, y=DUPLICATE_RATE))+
+  geom_point(aes(color=NUM_READS_SEQUENCED))
+```
+
+fmol_real and library_complexity don't have an obvious linear relationship, even when subset but quant method and only looking at nanoseq libraries. However, when you normalize library_complexity by NUM READS SEQUENCED, there is a relationship with fmol_real. The normalized library complexity increases with fmol input to PCR. Which makes sense!
+
+Another way to look at this is plotting 'normalized non unique reads' (reads sequenced - unique reads)/reads sequenced, which has an inverse relationship with increasing fmol_real. Which is also what we expect. 
+
+I could be artificially inflating these trends by plotting multiple calculations of input of the same library, but that's life!
+
+What's most damning, is if I color my fmol vs duplicate plot, the more reads, the higher the duplicate rate for the most part. Let's investigate this a little more rigorously, using the QC and sequencing report from novogene. 
+
+I had calculated 1.122381e+07 reads for a nanoseq run, and despite my disappointing yields got that for almost all nanoseq runs. 
+```{r}
+novo <- seq_output %>% merge(lib_qc, on=sample_name)
+
+combo <- novo %>% merge(result, on=sample_name)
+reads <- combo %>% filter(library_type=='Nanoseq') %>% subset(select=c(sample_name, library_complexity, NUM_READS_SEQUENCED, NUM_UNIQUE_READS, raw_reads, fmol_input, fmol_real, quant_method)) %>% unique() 
+
+
+m1 <- ggplot(reads)+geom_point(aes(x=raw_reads, y=library_complexity)) + theme_classic()
+m2 <- ggplot(reads) + geom_point(aes(x=fmol_real, y=library_complexity, color=quant_method)) + theme_classic()
+
+m1 + m2
+```
+Library complexity is explained more by sequencing amount than fmol input to PCR amplification. Is that true for their data?
+```{r}
+qpcr <-  read.table("miseq_concentrations_Pete_Ellis_20190809.txt", header=1, sep="\t", stringsAsFactors=F)
+pub1 <- ggplot(qpcr) + geom_point(aes(x=seq_reads, y=unique_fragments)) + theme_classic()
+pub2 <- ggplot(qpcr) + geom_point(aes(x=fmol, y=unique_fragments)) + theme_classic()
+
+pub1 + pub2
+```
+
+COMBINE
+```{r}
+qpcr
+reads
+
+ggplot()+
+  geom_point(data=reads, aes(x=NUM_READS_SEQUENCED, y=library_complexity), color='blue')+
+  geom_point(data=qpcr, aes(seq_reads, y=unique_fragments), color='pink')
+
+base <- ggplot()+
+  geom_smooth(data=qpcr, aes(fmol, y=unique_fragments), color='black', method='lm')+
+  geom_point(data=qpcr, aes(fmol, y=unique_fragments), color='darkgrey')+
+  theme_classic()
+
+quibit <- base + geom_point(data=reads %>% filter(quant_method=='quibit'), 
+                  aes(x=fmol_real, y=library_complexity, color='quibit'))
+
+kapa <- base + geom_point(data=reads %>% filter(quant_method=='kapa_qpcr'), 
+                  aes(x=fmol_real, y=library_complexity, color='kapa_qpcr'))
+
+sybr1 <- base + geom_point(data=reads %>% filter(quant_method=='sybr_qpcr_1'), 
+                  aes(x=fmol_real, y=library_complexity, color='sybr_qpcr_1'))
+
+sybr2 <- base + geom_point(data=reads %>% filter(quant_method=='sybr_qpcr_2'), 
+                  aes(x=fmol_real, y=library_complexity, color='sybr_qpcr_2'))
+
+quibit + kapa + sybr1 + sybr2
+```
+They have very tight replicates, I wonder if it's a single library serially diluted. Or maybe my library complexity estimations are off. 
+
+Since library complexity *should* be independent of sequencing depth, I can test different depths with my given complexities and see if that will give me the duplicate rate I want...
+
+```{r}
+reads %>% subset(select=c(sample_name, library_complexity, NUM_READS_SEQUENCED)) %>% unique()
+```
+
+From Abascal plots: 
+This theoretical distribution is from Abascal et. al 2021, imported from the `botseq_efficiency.R` script hosted on zenodo.
+```{r}
+```
+
+```{r}
+reads
+t <- combo %>% 
+  subset(select=c(sample_name, raw_reads, raw_data, library_complexity, NUM_READS_SEQUENCED, DUPLICATE_RATE, library_type)) %>% 
+  unique()
+
+read_check <- t %>% 
+  filter(library_type == 'Nanoseq') %>% 
+  mutate(requested_data=3.5) %>% 
+  mutate(ideal_reads=requested_data*5108422) %>% 
+  mutate(seq_yield=NUM_READS_SEQUENCED/library_complexity) %>% 
+  mutate(seq_yield_ideal=ideal_reads/library_complexity)
+
+t
+
+p1 + 
+  geom_point(data=qpcr, aes(x=seq_reads/unique_fragments, y=duprate, color='qpcr'))+
+  geom_point(data=t, aes(x=NUM_READS_SEQUENCED/library_complexity, y=DUPLICATE_RATE, color=library_type))+
+  geom_point(data=read_check, aes(x=ideal_reads/library_complexity, y=0))
+
+#5 is the ideal seq ratio 
+t %>% mutate(needed_reads = library_complexity*5) %>% mutate(magnitude=needed_reads/raw_reads)
+
+```
+

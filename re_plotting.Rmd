@@ -127,6 +127,15 @@ ggplot(frag_HpyCH4V)+
   theme_classic()
 ```
 
+```{r}
+simul <- ggplot(data=frag_HpyCH4V, aes(x=midpoint))+
+  geom_histogram()+
+  facet_wrap(~chrom, scales='free_x', nrow=1)+
+  ylab('Simulated Fragment Count')+
+  theme_classic()
+```
+
+
 
 Repeat for 150bp reads 
 
@@ -156,9 +165,46 @@ ggplot(data=nuc, aes(x=midpoint))+
   facet_grid(enzyme~chrom, scales='free_x')
 
 
-ggplot(data=not_nuc, aes(x=midpoint))+
+simulated <- ggplot(data=not_nuc, aes(x=midpoint))+
   geom_histogram()+
   facet_grid(enzyme~chrom, scales='free_x')
+
+ggsave(filename='C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\Outputs\\NLR Features Paper\\EMBO Submission\\Figure Panels\\fig_5b.svg', plot=simulated, dpi=1000, width=8.5,  height=3, units='in')
 ```
 
+Empirical: 
+```{r}
+cs_1 <- read_tsv("//wsl.localhost//Ubuntu//home//chandlersutherland//e20_scratch//CS_1.tsv", col_names=c('read_id', 'X', 'Chr', 'coord')) %>% subset(select=c('Chr', 'coord')) #%>% unique()
+un_cs_1 <- cs_1 %>% unique()
+```
+```{r}
+ggplot(data=cs_1, aes(x=coord))+
+  geom_histogram()+
+  facet_grid(~Chr, space='free_x', scales='free_x')
+```
+
+
+```{r}
+real <- ggplot(data=cs_1, aes(x=coord))+
+  geom_histogram()+
+  facet_grid(~Chr, scales='free_x')
+
+real_unique <- ggplot(data=un_cs_1, aes(x=coord))+
+  geom_histogram()+
+  facet_grid(~Chr, scales='free_x')+
+  ylab('Sequenced Reads Count')+
+  xlab('')+
+  theme_classic()
+
+simul <- ggplot(data=frag_HpyCH4V, aes(x=midpoint))+
+  geom_histogram()+
+  facet_wrap(~chrom, scales='free_x', nrow=1)+
+  ylab('Simulated Read Count')+
+  xlab('')+
+  theme_classic()
+
+combo <- simul+real_unique+plot_layout(nrow=2)
+
+ggsave('C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\Outputs\\UK 2024\\re_reads_plot.jpg', combo, width = 10, height= 4, units='in')
+```
 

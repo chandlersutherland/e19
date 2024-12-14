@@ -1,0 +1,292 @@
+---
+title: "efficiency_report"
+author: "Chandler Sutherland"
+date: "2024-09-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Goal: see what went wrong with my pilot, compare to theoretical estimates of efficiency, try to see if I had sequenced to my goal depth if there would have been an issue 
+
+eventually generalize to any library 
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(patchwork)
+```
+
+This theoretical distribution is from Abascal et. al 2021, imported from the `botseq_efficiency.R` script hosted on zenodo.
+```{r}
+# Truncated Poisson (only defined for x>=1): this models the duplicate family size distribution
+dpoistrunc = function(x, lambda) {
+	    d = dpois(x, lambda) / (1-dpois(0, lambda))
+	    d[x==0] = NA
+	    return(d)
+	}
+	
+# The mean sequencing cost of a family is the mean of the zero-truncated Poisson: 
+#  lambda/(1-exp(-lambda))
+	
+# Efficiency: The fraction of families of size>=2 divided by the average size (i.e. 
+#  sequencing cost) of a family, squared (as we need coverage from both strands)
+	
+ratio = seq(0,20,by=0.1) # Sequencing output / library complexity
+	
+efficiency = (ppois(q=2-0.1, lambda=ratio/2, lower.tail=F)/(1-dpois(0, ratio/2)))^2 / (ratio/(1-exp(-ratio)))
+	
+# Duprate can be simply calculated using the mean of the family size (from the zero-truncated 
+#  Poisson): 1-1/mean = 1-(1-exp(-r))/r
+duprate = 1-(1-exp(-ratio))/ratio
+	
+dev.new(width=9, height=3)
+par(mfrow=c(1,3))
+
+#Duplicate Rate vs Seq ratio	
+p1 <- ggplot()+
+  geom_line(aes(x=ratio, y=duprate)) + 
+  xlab("Seq ratio (sequencing yield / lib complexity)")+
+  ylab("Duplicate Rate")+
+  theme_classic()
+
+#Duplicate rate vs efficiency 
+opt_duprate = duprate[which.max(efficiency)]
+ind = which(efficiency > max(efficiency, na.rm=T)*0.8)
+```
+
+
+```{r}
+# I adapted the plots to ggplot2 for my own sanity 
+p2 <- ggplot()+
+  geom_line(aes(x=duprate, y=efficiency)) + 
+  xlab("Duplicate rate")+
+  ylab("Efficiency (duplex bp / total bp)")+
+  xlim(0,1)+
+  geom_vline(xintercept=opt_duprate, color='red')+
+  geom_vline(xintercept=duprate[min(ind)], color='red', linetype=2)+
+  geom_vline(xintercept=duprate[max(ind)], color='red', linetype=2)+
+  theme_classic()
+
+#ratio vs efficiency 
+opt_ratio = ratio[which.max(efficiency)] 
+ind = which(efficiency > max(efficiency, na.rm=T)*0.8)
+p3 <- ggplot()+
+  geom_line(aes(x=ratio, y=efficiency))+
+  xlab("Seq ratio (sequencing yield / lib complexity)")+
+  ylab("Efficiency (duplex bp / total bp)")+
+  geom_vline(xintercept=opt_ratio, color='red')+
+  geom_vline(xintercept=ratio[min(ind)], color='red', linetype=2)+
+  geom_vline(xintercept=ratio[max(ind)], color='red', linetype=2)+
+  theme_classic()
+
+p1 + p2 + p3
+```
+
+```{r}
+#import actual sequencing data to overlay 
+pilot <- read_csv("//wsl.localhost//Ubuntu//home//chandlersutherland//e20_scratch//20240809_Col_0_pilot_summary.tsv")
+
+merged <- read_csv("//wsl.localhost//Ubuntu//home//chandlersutherland//e20_scratch//20240809_Col_0_merge_summary.tsv")
+
+complexity <- read_tsv("//wsl.localhost//Ubuntu//home//chandlersutherland//e20_scratch//complexity_report.tsv")
+```
+
+# Pilot Specific QC
+
+F-EFF or strand drop out fraction: This shows the fraction of read bundles missing one of the two original strands beyond what would be expected under random sampling (assuming a binomial process). Good values are between 0.10-0.30, and larger values are likely due to DNA damage such as modified bases or internal nicks that prevent amplification of one of the two strands. Larger values do not impact the quality of the results, just reduce the efficiency of the protocol.
+
+```{r}
+pilot %>%
+  filter(library_type=='Nanoseq') %>% 
+  ggplot(aes(x=individual, y=`F-EFF`))+
+  geom_point()+
+  ylim(0, 0.5)+
+  ylab('F-EFF: Drop out fraction')+
+  geom_hline(yintercept=0.1, linetype=2)+
+  geom_hline(yintercept=0.3, linetype=2)+
+  theme_classic()
+
+```
+
+GC_BOTH and GC_SINGLE: the GC content of RBs with both strands and with just one strand. The two values should be similar between them and similar to the genome average. If there are large deviations that is possibly due to biases during PCR amplification. If GC_BOTH is substantially larger than GC_SINGLE, DNA denaturation before dilution may have taken place.
+
+```{r}
+pilot %>%
+  ggplot(aes(x=GC_BOTH, y=GC_SINGLE))+
+  geom_point()+
+  geom_vline(xintercept=0.36, color='red', linetype=2)+
+  geom_hline(yintercept=0.36, color='red', linetype=2)+
+  theme_classic()
+
+```
+
+Observed duplicate rate and efficiency over the theoretical distribution: 
+```{r}
+zoom <- p2+
+  geom_point(data=pilot, aes(x=DUPLICATE_RATE, y=EFFICIENCY))+
+  geom_point(data=merged, aes(x=DUPLICATE_RATE, y=EFFICIENCY), color='blue')+
+  xlim(0, 0.25)+
+  ylim(0, 0.01)
+
+no_zoom <- p2+
+  geom_point(data=pilot, aes(x=DUPLICATE_RATE, y=EFFICIENCY))+
+  geom_point(data=merged, aes(x=DUPLICATE_RATE, y=EFFICIENCY), color='blue')
+
+no_zoom + zoom
+```
+
+# Comparing statistics to merged technical replicates 
+
+Not a useful plot because not scaled by reads 
+```{r}
+both <- pilot %>% 
+  filter(library_type=='Nanoseq') %>% 
+  subset(select=colnames(merged)) %>% 
+  mutate(type='individual_replicate')%>%
+  rbind(merged%>%mutate(type='merged')) %>%
+  subset(select=c(index, NUM_READS_SEQUENCED, NUM_UNIQUE_READS, READS_PER_RB, EFFICIENCY, DUPLICATE_RATE, type))
+
+eff <- both %>% ggplot()+
+  geom_point(aes(x=NUM_UNIQUE_READS, y=EFFICIENCY, color=type)) +
+  geom_smooth(aes(x=NUM_UNIQUE_READS, y=EFFICIENCY), method='lm')+
+  theme_classic()
+
+dup <- both %>% ggplot()+
+  geom_point(aes(x=NUM_UNIQUE_READS, y=DUPLICATE_RATE, color=type))+
+  geom_smooth(aes(x=NUM_UNIQUE_READS, y=DUPLICATE_RATE), method='lm')+
+  theme_classic()
+
+l <- eff+dup+plot_layout(guides = 'collect')
+l
+#ggsave("//wsl.localhost//Ubuntu//home//chandlersutherland//e20_scratch//depth_eff.png", l, w=8, h=4, units = 'in')
+```
+
+```{r}
+pilot
+complexity
+comp <- merge(pilot, complexity, by="index") %>% 
+  subset(select=-c(`...1.y`, `...1.x`)) %>% 
+  mutate(fmol_input = case_when(library_type=='Nanoseq' ~ correction_factor*0.6, 
+                                library_type=='matched_normal' ~ 2
+                                )) %>% 
+  mutate(r=NUM_READS_SEQUENCED/library_complexity) 
+  
+comp %>% write.csv('pilot_complexity.csv')
+
+ggplot(comp%>%
+  filter(library_type=='Nanoseq'))+
+  geom_point(aes(x=fmol_input, y=library_complexity))+
+  geom_smooth(aes(x=fmol_input, y=library_complexity), method='lm')+
+  theme_classic()
+
+qpcr = read.table("miseq_concentrations_Pete_Ellis_20190809.txt", header=1, sep="\t", stringsAsFactors=F)
+	
+ggplot()+
+  geom_point(data=qpcr, aes(x=fmol, y=unique_fragments))+
+  geom_smooth(data=qpcr, aes(x=fmol, y=unique_fragments), method='lm')+
+  geom_point(data=comp%>%filter(library_type=='Nanoseq'), aes(x=fmol_input, y=library_complexity), color='red')+
+  theme_classic()
+
+qpcr
+comp %>% filter(library_type=='Nanoseq') %>% subset(select=c(index, NUM_READS_SEQUENCED, NUM_UNIQUE_READS, library_complexity, r))
+qpcr %>% mutate(r=seq_reads/unique_fragments)
+```
+
+```{r}
+model = lm(qpcr$unique_fragments ~ qpcr$fmol -1) # - 1 specifies a line through the origin 
+summary(model)
+m <- coefficients(model)[[1]] # slope (unique fragments per fmol): (9.8e7 unique fragments / fmol)
+confint(model)
+#y=mx 
+#y=mx 
+
+ratio <- comp %>% mutate(pred_fmol=library_complexity/m) %>% 
+  mutate(reads_required=library_complexity*5) %>% 
+  filter(library_type=='Nanoseq') %>%
+  subset(select=c('index', 'NUM_READS_SEQUENCED', 'DUPLICATE_RATE', 'library_complexity', 'fmol_input', 'r', 'pred_fmol'))
+  
+
+ggplot(ratio, aes(x=fmol_input, y=pred_fmol))+
+  geom_point()+
+  geom_abline(slope=1, intercept=0)+
+  xlim(0,1.2)+
+  ylim(0, 1.2)
+```
+
+```{r}
+qpcr %>% 
+  ggplot(aes(y=seq_reads/unique_fragments, x=fmol)) + 
+  geom_point()
+```
+
+
+```{r}
+p4 <- p1+
+  geom_point(data=comp, aes(x=r, y=DUPLICATE_RATE, color=library_type))
+
+p5 <- p2+
+  geom_point(data=comp, aes(x=DUPLICATE_RATE, y=EFFICIENCY, color=library_type))
+
+p6 <- p3+
+  geom_point(data=comp, aes(x=r, y=EFFICIENCY, color=library_type))
+
+pilot <- p4 + p5 + p6 + plot_layout(guides='collect') & theme(legend.position='bottom')
+ggsave("//wsl.localhost//Ubuntu//home//chandlersutherland//e20_scratch//pilot_eff.png", pilot, w=10, h=4.5, units = 'in')
+```
+
+
+
+```{r}
+f_pilot <- pilot %>% filter(library_type=='Nanoseq') %>% mutate(fmol_input = correction_factor*0.6)
+f_merged <- merged %>% mutate(fmol_input = 1.65)
+b_f <- f_pilot %>% 
+  subset(select=colnames(f_merged)) %>% 
+  mutate(type='individual_replicate')%>%
+  rbind(f_merged%>%mutate(type='merged')) %>%
+  subset(select=c(index, NUM_READS_SEQUENCED, NUM_UNIQUE_READS, READS_PER_RB, EFFICIENCY, DUPLICATE_RATE, type, fmol_input))
+
+beff <- b_f %>% ggplot()+
+  geom_point(aes(x=fmol_input, y=EFFICIENCY, color=type)) +
+  geom_smooth(aes(x=fmol_input, y=EFFICIENCY), method='lm')+
+  theme_classic()
+
+bdup <- b_f %>% ggplot()+
+  geom_point(aes(x=fmol_input, y=DUPLICATE_RATE, color=type))+
+  geom_smooth(aes(x=fmol_input, y=DUPLICATE_RATE), method='lm')+
+  theme_classic()
+
+bl <- beff+bdup+plot_layout(guides = 'collect')
+```
+
+```{r}
+b_f
+
+b_f %>% ggplot()+
+  geom_point(aes(x=fmol_input/NUM_READS_SEQUENCED, y=EFFICIENCY, color=type)) +
+  geom_smooth(aes(x=fmol_input/NUM_READS_SEQUENCED, y=EFFICIENCY), method='lm')+
+  theme_classic()
+
+b_f %>% ggplot()+
+  geom_point(aes(x=fmol_input/NUM_READS_SEQUENCED, y=DUPLICATE_RATE, color=type))+
+  geom_smooth(aes(x=fmol_input/NUM_READS_SEQUENCED, y=DUPLICATE_RATE), method='lm')+
+  theme_classic()
+```
+
+```{r}
+b_f
+```
+
+```{r}
+duprate = 1-(1-exp(-ratio))/ratio
+#d=1-1/m
+#1/1-d=m 
+
+
+
+b_f %>% mutate(mean_bundle_size=1/(1-DUPLICATE_RATE))
+```
+
+
