@@ -1,0 +1,126 @@
+---
+title: "size_selection"
+author: "Chandler Sutherland"
+date: "2024-12-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(ggplot2)
+require(tidyverse)
+library(openxlsx)
+library(patchwork)
+```
+Load raw results from fragment analysis 12/16/2024 from qb3
+
+sample 1 (control)	2.5x
+sample 2	1.8x
+sample 3	0.9x
+sample 4	0.7x
+sample 5	reverse 1 (0.55x; 1x)
+sample 6	reverse 2 (0.64x; 0.77x)
+```{r}
+data_path <- "C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\fragment analysis\\20241216 raw files\\"
+cs5 <- read_csv(paste(data_path, '2024 12 16 14H 48M B1  CS5.csv', sep='')) %>% mutate(sample='CS5')
+cs6 <- read_csv(paste(data_path, '2024 12 16 14H 48M B2  CS6.csv', sep='')) %>% mutate(sample='CS6')
+cs7 <- read_csv(paste(data_path, '2024 12 16 14H 48M B3  CS7.csv', sep='')) %>% mutate(sample='CS7')
+cs8 <- read_csv(paste(data_path, '2024 12 16 14H 48M B4  CS8.csv', sep='')) %>% mutate(sample='CS8')
+cs9 <- read_csv(paste(data_path, '2024 12 16 14H 48M B5  CS9.csv', sep='')) %>% mutate(sample='CS9')
+cs10 <- read_csv(paste(data_path, '2024 12 16 14H 48M B6  CS10.csv', sep='')) %>% mutate(sample='CS10')
+
+raw_frag <- rbind(cs5, cs6, cs7, cs8, cs9, cs10)
+
+raw_frag <- raw_frag %>% mutate(ampure=case_when(sample=='CS10' ~ 'reverse (0.64x; 0.77x)', 
+                                     sample=='CS5' ~ '2.5x', 
+                                     sample=='CS6' ~ '1.8x', 
+                                     sample=='CS7' ~ '0.9x', 
+                                     sample=='CS8' ~ '0.7x', 
+                                     sample=='CS9' ~ 'reverse (0.55x; 1x)'))
+
+summary <- read_csv(paste(data_path, '2024 12 16 14H 48M Smear Analysis Result.csv', sep='')) %>% 
+  mutate(ampure=case_when(`Sample ID`=='CS10' ~ 'reverse (0.64x; 0.77x)', 
+                                     `Sample ID`=='CS5' ~ '2.5x', 
+                                     `Sample ID`=='CS6' ~ '1.8x', 
+                                     `Sample ID`=='CS7' ~ '0.9x', 
+                                     `Sample ID`=='CS8' ~ '0.7x', 
+                                     `Sample ID`=='CS9' ~ 'reverse (0.55x; 1x)'))
+```
+
+```{r}
+ggplot(raw_frag) +
+  geom_line(aes(x=`Size (bp)`, y= Intensity, color=ampure))+
+  xlim(0, 6500)+
+  theme_classic()
+```
+
+Just look at the regular concentrations 
+```{r}
+forward <- raw_frag %>% filter(sample %in% c('CS5', 'CS6', 'CS7', 'CS8'))
+
+ggplot(forward) +
+  geom_line(aes(x=`Size (bp)`, y= Intensity, color=ampure))+
+  xlim(15, 4000)+
+  ylim(0,1000)+
+  geom_vline(xintercept=854, color='purple')+
+  geom_vline(xintercept=844, color='lightblue')+
+  geom_vline(xintercept=845, color='green')+
+  geom_vline(xintercept=1004, color='coral')+
+  #geom_vline()
+  theme_classic()
+```
+
+Reverse size selection:
+```{r}
+reverse <- raw_frag %>% filter(sample %in% c('CS9', 'CS10'))
+
+ggplot(reverse) +
+  geom_line(aes(x=`Size (bp)`, y= Intensity, color=ampure))+
+  xlim(15, 1000)+
+  ylim(0,250)+
+  geom_vline(xintercept=555, color='coral')+
+  geom_vline(xintercept=704, color='#00BFC4')+
+  #geom_vline()
+  theme_classic()
+```
+
+
+Compare to simulated fragment distribution with no size selection 
+```{r}
+scratch_path <- "//wsl.localhost//Ubuntu//home//chandlersutherland//e19_scratch//"
+Chr1 <- read_tsv(paste(scratch_path, 'Chr1_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'))
+Chr2 <- read_tsv(paste(scratch_path, 'Chr2_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'))
+Chr3 <- read_tsv(paste(scratch_path, 'Chr3_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'))
+Chr4 <- read_tsv(paste(scratch_path, 'Chr4_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'))
+Chr5 <- read_tsv(paste(scratch_path, 'Chr5_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'))
+ChrC <- read_tsv(paste(scratch_path, 'ChrC_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'))
+ChrM <- read_tsv(paste(scratch_path, 'ChrM_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'))
+
+sim_frag <- rbind(Chr1, Chr2, Chr3, Chr4, Chr5, ChrC, ChrM)
+sim_frag <- sim_frag %>% mutate(frag_size=stop-start)
+```
+
+```{r}
+#get the normal cleanup range after digestion 
+point_7 <- raw_frag %>% filter(sample=='CS8') %>% filter(`Size (bp)` > 15) %>% filter(`Size (bp)` < 4000)
+
+ggplot()+
+  geom_density(dat=sim_frag, aes(x=frag_size, color='simulated fragment distribution'))+
+  geom_line(data=point_7, aes(x=`Size (bp)`, y=Intensity/50e4, color='empirical fragment distribution'))+
+  labs(title='post HpyCH4V digestion fragment size')+
+  theme_classic()
+
+ggplot()+
+  geom_histogram(data=sim_frag, aes(x=frag_size))+
+  xlim(50, 4000)+
+  geom_line(data=raw_frag %>% filter(sample=='CS8'), aes(x=`Size (bp)`, y=Intensity*100))+
+  theme_classic()
+
+ %>% pull(Intensity) %>% sum()
+```
+
+
