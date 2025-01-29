@@ -24,6 +24,7 @@ sample 3	0.9x
 sample 4	0.7x
 sample 5	reverse 1 (0.55x; 1x)
 sample 6	reverse 2 (0.64x; 0.77x)
+
 ```{r}
 data_path <- "C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\fragment analysis\\20241216 raw files\\"
 cs5 <- read_csv(paste(data_path, '2024 12 16 14H 48M B1  CS5.csv', sep='')) %>% mutate(sample='CS5')
@@ -62,7 +63,7 @@ Just look at the regular concentrations
 ```{r}
 forward <- raw_frag %>% filter(sample %in% c('CS5', 'CS6', 'CS7', 'CS8'))
 
-ggplot(forward) +
+gradient_plot <- ggplot(forward) +
   geom_line(aes(x=`Size (bp)`, y= Intensity, color=ampure))+
   xlim(15, 4000)+
   ylim(0,1000)+
@@ -72,13 +73,15 @@ ggplot(forward) +
   geom_vline(xintercept=1004, color='coral')+
   #geom_vline()
   theme_classic()
+
+gradient_plot
 ```
 
 Reverse size selection:
 ```{r}
 reverse <- raw_frag %>% filter(sample %in% c('CS9', 'CS10'))
 
-ggplot(reverse) +
+two_side <- ggplot(reverse) +
   geom_line(aes(x=`Size (bp)`, y= Intensity, color=ampure))+
   xlim(15, 1000)+
   ylim(0,250)+
@@ -86,6 +89,8 @@ ggplot(reverse) +
   geom_vline(xintercept=704, color='#00BFC4')+
   #geom_vline()
   theme_classic()
+
+two_side
 ```
 
 
@@ -106,7 +111,7 @@ sim_frag <- sim_frag %>% mutate(frag_size=stop-start)
 
 ```{r}
 #get the normal cleanup range after digestion 
-point_7 <- raw_frag %>% filter(sample=='CS8') %>% filter(`Size (bp)` > 15) %>% filter(`Size (bp)` < 4000)
+point_7 <- raw_frag %>% filter(sample=='CS6') %>% filter(`Size (bp)` > 15) %>% filter(`Size (bp)` < 4000)
 
 ggplot()+
   geom_density(dat=sim_frag, aes(x=frag_size, color='simulated fragment distribution'))+
@@ -119,8 +124,65 @@ ggplot()+
   xlim(50, 4000)+
   geom_line(data=raw_frag %>% filter(sample=='CS8'), aes(x=`Size (bp)`, y=Intensity*100))+
   theme_classic()
-
- %>% pull(Intensity) %>% sum()
 ```
 
+## New day new smears 
+
+Load the data from library prep result 01/14/2025
+```{r}
+data_path <- "C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\fragment analysis\\20250114\\"
+all_lanes <- read_csv(paste(data_path, '2025 01 10 17H 40M Electropherogram (1).csv', sep='')) %>%
+  pivot_longer(cols=starts_with('F'), names_to='sample', values_to='Intensity') %>% 
+  separate('sample', c(NA, 'sample'))  %>% 
+  rename(size = `Size (bp)`)
+
+```
+
+```{r}
+ggplot(all_lanes) +
+  geom_line(aes(x=size, y= Intensity, color=sample))+
+  xlim(0, 6500)+
+  theme_classic()
+```
+
+```{r}
+gradient_plot +
+  geom_line(data=all_lanes, aes(x=size, y= Intensity, color=sample))
+
+two_side+
+  geom_line(data=all_lanes, aes(x=size, y= Intensity, color=sample))
+```
+
+```{r}
+global_max <- all_lanes %>% filter(size < 3500 & size > 75) %>% 
+  group_by(sample)%>%
+  filter(Intensity == max(Intensity, na.rm=TRUE))
+
+smooth_max <- all_lanes %>% filter(size < 3500 & size > 75) %>%
+  group_by(sample) %>%
+  mutate(smooth = predict(loess(Intensity~size)))%>% 
+  slice_max(order_by = smooth)
+
+
+sequenceable <- all_lanes %>% filter(size < 800 & size > 200) %>%
+  group_by(sample) %>%
+  mutate(smooth = predict(loess(Intensity~size)))%>% 
+  slice_max(order_by = smooth)
+
+
+ggplot() +
+  geom_line(data=all_lanes, aes(x=size, y= Intensity, color=sample))+
+  xlim(75, 2500)+
+  ylim(0, 400)+
+  geom_vline(data=global_max, aes(xintercept=size, color=sample))+
+  theme_classic()
+
+ggplot()+
+  geom_smooth(data=all_lanes %>% filter(sample %in% c('CS14', 'CS15', 'CS17')), aes(x=size, y=Intensity, color=sample))+
+  theme_classic()+
+  geom_text(data=smooth_max %>% filter(sample %in% c('CS14', 'CS15', 'CS17')), 
+            aes(x=size, y=smooth, label=size, color=sample), nudge_y=15)+
+  xlim(75, 3500)+
+  ylim(0, 200)
+```
 
