@@ -9,6 +9,9 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+Copyright © Chandler Sutherland Email: [chandlersutherland\@berkeley.edu](mailto:chandlersutherland@berkeley.edu){.email}
+
+Purpose: compare size distribution plots from bioanalyzer for a variety of modifications to the nanoseq protocol. 
 
 ```{r}
 library(ggplot2)
@@ -16,6 +19,11 @@ require(tidyverse)
 library(openxlsx)
 library(patchwork)
 ```
+
+# Size selection 
+
+This is all pre-PCR at this point. 
+
 Load raw results from fragment analysis 12/16/2024 from qb3
 
 sample 1 (control)	2.5x
@@ -53,28 +61,29 @@ summary <- read_csv(paste(data_path, '2024 12 16 14H 48M Smear Analysis Result.c
 ```
 
 ```{r}
-ggplot(raw_frag) +
+size_distro <- ggplot(raw_frag) +
   geom_line(aes(x=`Size (bp)`, y= Intensity, color=ampure))+
-  xlim(0, 6500)+
-  theme_classic()
+  scale_x_log10(limits=c(5,NA), breaks=c(1, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
+  theme_classic()+
+  geom_vline(xintercept=200, linetype=2, color='grey')+
+  geom_vline(xintercept=1000, linetype=2, color='grey')
+
+size_distro
 ```
 
-Just look at the regular concentrations 
+Just look at the regular concentrations  
 ```{r}
 forward <- raw_frag %>% filter(sample %in% c('CS5', 'CS6', 'CS7', 'CS8'))
 
-gradient_plot <- ggplot(forward) +
+forward_plot <- ggplot(forward) +
   geom_line(aes(x=`Size (bp)`, y= Intensity, color=ampure))+
-  xlim(15, 4000)+
-  ylim(0,1000)+
-  geom_vline(xintercept=854, color='purple')+
-  geom_vline(xintercept=844, color='lightblue')+
-  geom_vline(xintercept=845, color='green')+
-  geom_vline(xintercept=1004, color='coral')+
-  #geom_vline()
+  scale_x_log10(limits=c(5,4000), breaks=c(1, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
+  geom_vline(xintercept=200, linetype=2, color='grey')+
+  geom_vline(xintercept=1000, linetype=2, color='grey')+
+  ylim(0, 500)+
   theme_classic()
 
-gradient_plot
+forward_plot
 ```
 
 Reverse size selection:
@@ -83,11 +92,10 @@ reverse <- raw_frag %>% filter(sample %in% c('CS9', 'CS10'))
 
 two_side <- ggplot(reverse) +
   geom_line(aes(x=`Size (bp)`, y= Intensity, color=ampure))+
-  xlim(15, 1000)+
-  ylim(0,250)+
-  geom_vline(xintercept=555, color='coral')+
-  geom_vline(xintercept=704, color='#00BFC4')+
-  #geom_vline()
+  scale_x_log10(limits=c(5,4000), breaks=c(1, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
+  geom_vline(xintercept=200, linetype=2, color='grey')+
+  geom_vline(xintercept=1000, linetype=2, color='grey')+
+  ylim(0, 500)+
   theme_classic()
 
 two_side
@@ -107,82 +115,67 @@ ChrM <- read_tsv(paste(scratch_path, 'ChrM_fragment_no_size_selection.bed', sep=
 
 sim_frag <- rbind(Chr1, Chr2, Chr3, Chr4, Chr5, ChrC, ChrM)
 sim_frag <- sim_frag %>% mutate(frag_size=stop-start)
-```
 
-```{r}
-#get the normal cleanup range after digestion 
-point_7 <- raw_frag %>% filter(sample=='CS6') %>% filter(`Size (bp)` > 15) %>% filter(`Size (bp)` < 4000)
-
-ggplot()+
-  geom_density(dat=sim_frag, aes(x=frag_size, color='simulated fragment distribution'))+
-  geom_line(data=point_7, aes(x=`Size (bp)`, y=Intensity/50e4, color='empirical fragment distribution'))+
-  labs(title='post HpyCH4V digestion fragment size')+
-  theme_classic()
-
-ggplot()+
-  geom_histogram(data=sim_frag, aes(x=frag_size))+
-  xlim(50, 4000)+
-  geom_line(data=raw_frag %>% filter(sample=='CS8'), aes(x=`Size (bp)`, y=Intensity*100))+
-  theme_classic()
-```
-
-## New day new smears 
-
-Load the data from library prep result 01/14/2025
-```{r}
-data_path <- "C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\fragment analysis\\20250114\\"
-all_lanes <- read_csv(paste(data_path, '2025 01 10 17H 40M Electropherogram (1).csv', sep='')) %>%
-  pivot_longer(cols=starts_with('F'), names_to='sample', values_to='Intensity') %>% 
-  separate('sample', c(NA, 'sample'))  %>% 
-  rename(size = `Size (bp)`)
-
-```
-
-```{r}
-ggplot(all_lanes) +
-  geom_line(aes(x=size, y= Intensity, color=sample))+
-  xlim(0, 6500)+
-  theme_classic()
-```
-
-```{r}
-gradient_plot +
-  geom_line(data=all_lanes, aes(x=size, y= Intensity, color=sample))
-
-two_side+
-  geom_line(data=all_lanes, aes(x=size, y= Intensity, color=sample))
-```
-
-```{r}
-global_max <- all_lanes %>% filter(size < 3500 & size > 75) %>% 
-  group_by(sample)%>%
-  filter(Intensity == max(Intensity, na.rm=TRUE))
-
-smooth_max <- all_lanes %>% filter(size < 3500 & size > 75) %>%
-  group_by(sample) %>%
-  mutate(smooth = predict(loess(Intensity~size)))%>% 
-  slice_max(order_by = smooth)
-
-
-sequenceable <- all_lanes %>% filter(size < 800 & size > 200) %>%
-  group_by(sample) %>%
-  mutate(smooth = predict(loess(Intensity~size)))%>% 
-  slice_max(order_by = smooth)
-
-
-ggplot() +
-  geom_line(data=all_lanes, aes(x=size, y= Intensity, color=sample))+
-  xlim(75, 2500)+
-  ylim(0, 400)+
-  geom_vline(data=global_max, aes(xintercept=size, color=sample))+
-  theme_classic()
-
-ggplot()+
-  geom_smooth(data=all_lanes %>% filter(sample %in% c('CS14', 'CS15', 'CS17')), aes(x=size, y=Intensity, color=sample))+
+ggplot(sim_frag)+
+  geom_histogram(aes(x=frag_size))+
   theme_classic()+
-  geom_text(data=smooth_max %>% filter(sample %in% c('CS14', 'CS15', 'CS17')), 
-            aes(x=size, y=smooth, label=size, color=sample), nudge_y=15)+
-  xlim(75, 3500)+
-  ylim(0, 200)
+  labs(title='Simulated distribution of fragment sizes')+
+  xlab('fragment size')+
+  ylab('count')
+
+summary(sim_frag$frag_size)
+```
+Most fragments are small, average fragment size is 270, median fragment size 171, max 2987.
+
+```{r}
+#using base R density function 
+point_7 <- raw_frag %>% filter(sample=='CS8') #0.7x Ampure bead cleanup
+density_calc <- density(sim_frag$frag_size, from=11)
+
+density_df <- data.frame(
+  x=density_calc$x, 
+  y=density_calc$y
+)
+
+ggplot()+
+  geom_line(data=density_df, aes(x=x, y=y*125000, color='simulated'))+
+  geom_line(data=point_7, aes(x=`Size (bp)`, y=Intensity, color='empirical'))+
+  scale_x_log10(limits=c(5, 3000), breaks=c(1, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000))+
+  geom_vline(xintercept=200, linetype=2, color='grey')+
+  geom_vline(xintercept=1000, linetype=2, color='grey')+
+  ylim(0, 600)+
+  theme_classic()
+
+#geom_density 
+ggplot()+
+  geom_density(dat=sim_frag, aes(x=frag_size, color='simulated fragment distribution'), kernel='gaussian', bw='nrd0', n=512, bounds=c(1, Inf))+
+  geom_line(data=point_7, aes(x=`Size (bp)`, y=Intensity/550, color='empirical fragment distribution'))+
+  labs(title='post HpyCH4V digestion fragment size')+
+  xlab('bp')+
+  ylab('density')+
+  ylim(0,1)+
+  geom_vline(xintercept=200, linetype=2, color='grey')+
+  geom_vline(xintercept=1000, linetype=2, color='grey')+
+  scale_x_log10(limits=c(5,3000), breaks=c(1, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
+  theme_classic()
+```
+
+Not sure why the base R density function and the geom_density function have such different curves for simulated fragment. Played around with most of the parameters to no success, but either way it is less than the empirical distribution. 
+
+Did my two sided cleanup help?
+```{r}
+ggplot()+
+  geom_density(dat=sim_frag, 
+               aes(x=frag_size, color='simulated fragment distribution'), 
+               kernel='gaussian', bw='nrd0', n=512, bounds=c(1, Inf))+
+  geom_line(data=reverse, aes(x=`Size (bp)`, y=Intensity/150, color=ampure))+
+  labs(title='post HpyCH4V digestion fragment size')+
+  xlab('bp')+
+  ylab('density')+
+  ylim(0,1)+
+  geom_vline(xintercept=200, linetype=2, color='grey')+
+  geom_vline(xintercept=1000, linetype=2, color='grey')+
+  scale_x_log10(limits=c(5,3000), breaks=c(1, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
+  theme_classic()
 ```
 
