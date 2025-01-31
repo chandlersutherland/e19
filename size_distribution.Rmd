@@ -2,7 +2,7 @@
 title: "size_selection"
 author: "Chandler Sutherland"
 date: "2024-12-17"
-output: html_document
+output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
@@ -35,12 +35,12 @@ sample 6	reverse 2 (0.64x; 0.77x)
 
 ```{r}
 data_path <- "C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\fragment analysis\\20241216 raw files\\"
-cs5 <- read_csv(paste(data_path, '2024 12 16 14H 48M B1  CS5.csv', sep='')) %>% mutate(sample='CS5')
-cs6 <- read_csv(paste(data_path, '2024 12 16 14H 48M B2  CS6.csv', sep='')) %>% mutate(sample='CS6')
-cs7 <- read_csv(paste(data_path, '2024 12 16 14H 48M B3  CS7.csv', sep='')) %>% mutate(sample='CS7')
-cs8 <- read_csv(paste(data_path, '2024 12 16 14H 48M B4  CS8.csv', sep='')) %>% mutate(sample='CS8')
-cs9 <- read_csv(paste(data_path, '2024 12 16 14H 48M B5  CS9.csv', sep='')) %>% mutate(sample='CS9')
-cs10 <- read_csv(paste(data_path, '2024 12 16 14H 48M B6  CS10.csv', sep='')) %>% mutate(sample='CS10')
+cs5 <- read_csv(paste(data_path, '2024 12 16 14H 48M B1  CS5.csv', sep=''), show_col_types = F) %>% mutate(sample='CS5')
+cs6 <- read_csv(paste(data_path, '2024 12 16 14H 48M B2  CS6.csv', sep=''), show_col_types = F) %>% mutate(sample='CS6')
+cs7 <- read_csv(paste(data_path, '2024 12 16 14H 48M B3  CS7.csv', sep=''), show_col_types = F) %>% mutate(sample='CS7')
+cs8 <- read_csv(paste(data_path, '2024 12 16 14H 48M B4  CS8.csv', sep=''), show_col_types = F) %>% mutate(sample='CS8')
+cs9 <- read_csv(paste(data_path, '2024 12 16 14H 48M B5  CS9.csv', sep=''), show_col_types = F) %>% mutate(sample='CS9')
+cs10 <- read_csv(paste(data_path, '2024 12 16 14H 48M B6  CS10.csv', sep=''), show_col_types = F) %>% mutate(sample='CS10')
 
 raw_frag <- rbind(cs5, cs6, cs7, cs8, cs9, cs10)
 
@@ -51,7 +51,7 @@ raw_frag <- raw_frag %>% mutate(ampure=case_when(sample=='CS10' ~ 'reverse (0.64
                                      sample=='CS8' ~ '0.7x', 
                                      sample=='CS9' ~ 'reverse (0.55x; 1x)'))
 
-summary <- read_csv(paste(data_path, '2024 12 16 14H 48M Smear Analysis Result.csv', sep='')) %>% 
+summary <- read_csv(paste(data_path, '2024 12 16 14H 48M Smear Analysis Result.csv', sep=''), show_col_types = F) %>% 
   mutate(ampure=case_when(`Sample ID`=='CS10' ~ 'reverse (0.64x; 0.77x)', 
                                      `Sample ID`=='CS5' ~ '2.5x', 
                                      `Sample ID`=='CS6' ~ '1.8x', 
@@ -60,7 +60,7 @@ summary <- read_csv(paste(data_path, '2024 12 16 14H 48M Smear Analysis Result.c
                                      `Sample ID`=='CS9' ~ 'reverse (0.55x; 1x)'))
 ```
 
-```{r}
+```{r, warning=F}
 size_distro <- ggplot(raw_frag) +
   geom_line(aes(x=`Size (bp)`, y= Intensity, color=ampure))+
   scale_x_log10(limits=c(5,NA), breaks=c(1, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
@@ -71,111 +71,158 @@ size_distro <- ggplot(raw_frag) +
 size_distro
 ```
 
+Try normalizing by quibit concentration 
+```{r, warning=F}
+normalized <- raw_frag %>% mutate(conc=case_when(sample=='CS5' ~ 2.73, 
+                                   sample=='CS6' ~ 2.58, 
+                                   sample=='CS7' ~ 2.00, 
+                                   sample=='CS9' ~ 1.52, 
+                                   sample=='CS10' ~ 1.18, 
+                                   sample=='CS11' ~ 0.72)) %>%
+  mutate(normal=Intensity/conc)
+
+ggplot(normalized) +
+  geom_line(aes(x=`Size (bp)`, y= normal, color=ampure))+
+  scale_x_log10(limits=c(50,3000), breaks=c(1, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
+  theme_classic()+
+  geom_vline(xintercept=200, linetype=2, color='grey')+
+  geom_vline(xintercept=1000, linetype=2, color='grey')+
+  ylim(0, 300)
+
+ggplot(normalized %>% filter(sample=='CS5')) +
+  geom_line(aes(x=`Size (bp)`, y= normal, color=ampure))+
+  scale_x_log10(limits=c(50,3000), breaks=c(1, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
+  theme_classic()+
+  geom_vline(xintercept=200, linetype=2, color='grey')+
+  geom_vline(xintercept=1000, linetype=2, color='grey')+
+  ylim(0, 300)
+```
+
+
 Just look at the regular concentrations  
-```{r}
-forward <- raw_frag %>% filter(sample %in% c('CS5', 'CS6', 'CS7', 'CS8'))
+```{r, warning=F}
+forward <- normalized %>% filter(sample %in% c('CS5', 'CS6', 'CS7', 'CS8'))
 
 forward_plot <- ggplot(forward) +
-  geom_line(aes(x=`Size (bp)`, y= Intensity, color=ampure))+
-  scale_x_log10(limits=c(5,4000), breaks=c(1, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
+  geom_line(aes(x=`Size (bp)`, y= normal, color=ampure))+
+  scale_x_log10(limits=c(5,4000), 
+                breaks=c(1, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
   geom_vline(xintercept=200, linetype=2, color='grey')+
   geom_vline(xintercept=1000, linetype=2, color='grey')+
-  ylim(0, 500)+
+  ylim(0, 300)+
+  labs(title='single sided ampure cleanup')+
   theme_classic()
 
-forward_plot
-```
-
-Reverse size selection:
-```{r}
-reverse <- raw_frag %>% filter(sample %in% c('CS9', 'CS10'))
+#Reverse size selection:
+reverse <- normalized %>% filter(sample %in% c('CS9', 'CS10'))
 
 two_side <- ggplot(reverse) +
-  geom_line(aes(x=`Size (bp)`, y= Intensity, color=ampure))+
+  geom_line(aes(x=`Size (bp)`, y= normal, color=ampure))+
   scale_x_log10(limits=c(5,4000), breaks=c(1, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
   geom_vline(xintercept=200, linetype=2, color='grey')+
   geom_vline(xintercept=1000, linetype=2, color='grey')+
-  ylim(0, 500)+
+  ylim(0, 300)+
+  labs(title='two-sided ampure cleanup')+
   theme_classic()
 
-two_side
+forward_plot + two_side
 ```
 
+# Simulated Fragment Size Distribution 
 
 Compare to simulated fragment distribution with no size selection 
-```{r}
+```{r, warning=F}
 scratch_path <- "//wsl.localhost//Ubuntu//home//chandlersutherland//e19_scratch//"
-Chr1 <- read_tsv(paste(scratch_path, 'Chr1_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'))
-Chr2 <- read_tsv(paste(scratch_path, 'Chr2_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'))
-Chr3 <- read_tsv(paste(scratch_path, 'Chr3_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'))
-Chr4 <- read_tsv(paste(scratch_path, 'Chr4_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'))
-Chr5 <- read_tsv(paste(scratch_path, 'Chr5_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'))
-ChrC <- read_tsv(paste(scratch_path, 'ChrC_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'))
-ChrM <- read_tsv(paste(scratch_path, 'ChrM_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'))
+Chr1 <- read_tsv(paste(scratch_path, 'Chr1_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'), show_col_types = FALSE)
+Chr2 <- read_tsv(paste(scratch_path, 'Chr2_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'), show_col_types = FALSE)
+Chr3 <- read_tsv(paste(scratch_path, 'Chr3_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'), show_col_types = FALSE)
+Chr4 <- read_tsv(paste(scratch_path, 'Chr4_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'), show_col_types = FALSE)
+Chr5 <- read_tsv(paste(scratch_path, 'Chr5_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'), show_col_types = FALSE)
+ChrC <- read_tsv(paste(scratch_path, 'ChrC_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'), show_col_types = FALSE)
+ChrM <- read_tsv(paste(scratch_path, 'ChrM_fragment_no_size_selection.bed', sep=''), col_names=c('Chr', 'start', 'stop', 'frag'), show_col_types = FALSE)
 
 sim_frag <- rbind(Chr1, Chr2, Chr3, Chr4, Chr5, ChrC, ChrM)
-sim_frag <- sim_frag %>% mutate(frag_size=stop-start)
+sim_frag <- sim_frag %>% mutate(frag_size=stop-start) %>% 
+  mutate(protocol='simulated')
 
-ggplot(sim_frag)+
+frag_sum <- summary(sim_frag$frag_size)
+
+sim_frag_plot <- ggplot(sim_frag)+
   geom_histogram(aes(x=frag_size))+
+  geom_vline(aes(xintercept=mean(frag_size), color='mean'))+
+  geom_vline(aes(xintercept=median(frag_size), color='median'))+
+  geom_vline(xintercept=200, linetype=2, color='grey')+
+  geom_vline(xintercept=1000, linetype=2, color='grey')+
   theme_classic()+
   labs(title='Simulated distribution of fragment sizes')+
   xlab('fragment size')+
   ylab('count')
 
-summary(sim_frag$frag_size)
+sim_frag_plot_log <- ggplot(sim_frag)+
+  geom_histogram(aes(x=frag_size, y=..density..))+
+  geom_density(aes(x=frag_size))+
+  geom_vline(aes(xintercept=mean(frag_size), color='mean'), linetype=1)+
+  geom_vline(aes(xintercept=median(frag_size), color='median'), linetype=1)+
+  geom_vline(xintercept=200, linetype=2, color='grey')+
+  geom_vline(xintercept=1000, linetype=2, color='grey')+
+  theme_classic()+
+  labs(title='Density distribution of simulated fragment sizes')+
+  scale_x_log10(limits=c(5,4000), breaks=c(1, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
+  xlab('log10(fragment size)')+
+  ylab('count')
+
+sim_frag_plot + sim_frag_plot_log + plot_layout(guides = 'collect')
 ```
 Most fragments are small, average fragment size is 270, median fragment size 171, max 2987.
 
-```{r}
-#using base R density function 
-point_7 <- raw_frag %>% filter(sample=='CS8') #0.7x Ampure bead cleanup
-density_calc <- density(sim_frag$frag_size, from=11)
+Let's compare this distribution to our empirical distributions, both standard nanoseq and nanoseq vCAS 
+```{r, warning=F}
+#load the pre-pcr libraries processed using nanoseq as published 
+#averaging the forward library cleanups because pretty close anyway 
+control_max <- forward %>% filter(`Size (bp)` > 5 & `Size (bp)` < 4000) %>% pull(normal) %>% max(na.rm=T) #find peak (filter out LM and UM)
+control <- forward %>% mutate(to_one=normal/control_max) %>% #normalize by maximum point to get on a scale of 0-1
+  mutate(protocol='nanoseq_standard_prepcr')
 
-density_df <- data.frame(
-  x=density_calc$x, 
-  y=density_calc$y
-)
+#load the pre-pcr libraries processed using nanoseq vCAS 
+frag_traces_vCAS <- read_csv("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\fragment analysis\\20250114\\2025 01 10 17H 40M Electropherogram (1).csv") %>%
+  pivot_longer(cols=starts_with('F'), names_to='sample', values_to='Intensity') %>% 
+  separate('sample', c(NA, 'sample'))  %>% 
+  rename(size = `Size (bp)`) %>% 
+  mutate(plant_id=case_when(sample=='CS14' ~ 7, 
+                            sample=='CS15' ~ 8,
+                            sample=='CS16' ~ 9, 
+                            sample=='CS17' ~ 10)) %>%
+  mutate(protocol='nanoseq_vCAS_prepcr') %>%
+  mutate(conc=case_when(sample=='CS14' ~ 1.8736, 
+                            sample=='CS15' ~ 1.0360,
+                            sample=='CS16' ~ 1.8867, 
+                            sample=='CS17' ~ 1.3793)) %>%
+  mutate(normal=Intensity/conc)
 
-ggplot()+
-  geom_line(data=density_df, aes(x=x, y=y*125000, color='simulated'))+
-  geom_line(data=point_7, aes(x=`Size (bp)`, y=Intensity, color='empirical'))+
-  scale_x_log10(limits=c(5, 3000), breaks=c(1, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000))+
-  geom_vline(xintercept=200, linetype=2, color='grey')+
-  geom_vline(xintercept=1000, linetype=2, color='grey')+
-  ylim(0, 600)+
-  theme_classic()
+vCAS_max <- frag_traces_vCAS %>% filter(size > 5 & size < 4000) %>% pull(normal) %>% max() #find peak (filter out LM and UM)
 
-#geom_density 
-ggplot()+
-  geom_density(dat=sim_frag, aes(x=frag_size, color='simulated fragment distribution'), kernel='gaussian', bw='nrd0', n=512, bounds=c(1, Inf))+
-  geom_line(data=point_7, aes(x=`Size (bp)`, y=Intensity/550, color='empirical fragment distribution'))+
-  labs(title='post HpyCH4V digestion fragment size')+
-  xlab('bp')+
-  ylab('density')+
-  ylim(0,1)+
-  geom_vline(xintercept=200, linetype=2, color='grey')+
-  geom_vline(xintercept=1000, linetype=2, color='grey')+
-  scale_x_log10(limits=c(5,3000), breaks=c(1, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
-  theme_classic()
-```
+frag_traces_vCAS <- frag_traces_vCAS %>% mutate(to_one=normal/vCAS_max) #normalize by maximum point to get on a scale of 0-1
 
-Not sure why the base R density function and the geom_density function have such different curves for simulated fragment. Played around with most of the parameters to no success, but either way it is less than the empirical distribution. 
+frag_traces_vCAS$plant_id <- as.factor(frag_traces_vCAS$plant_id)
 
-Did my two sided cleanup help?
-```{r}
-ggplot()+
+#normalize to 1 
+prot_compare <- ggplot()+
+  geom_smooth(data=control, aes(x=`Size (bp)`, y=to_one, color=protocol))+
+  geom_smooth(data=frag_traces_vCAS, aes(x=size, y=to_one, color=protocol))+
   geom_density(dat=sim_frag, 
-               aes(x=frag_size, color='simulated fragment distribution'), 
+               aes(x=frag_size, color=protocol), 
                kernel='gaussian', bw='nrd0', n=512, bounds=c(1, Inf))+
-  geom_line(data=reverse, aes(x=`Size (bp)`, y=Intensity/150, color=ampure))+
+  scale_x_log10(limits=c(5,4000), breaks=c(1, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
   labs(title='post HpyCH4V digestion fragment size')+
-  xlab('bp')+
+  xlab('log10(bp)')+
   ylab('density')+
   ylim(0,1)+
   geom_vline(xintercept=200, linetype=2, color='grey')+
   geom_vline(xintercept=1000, linetype=2, color='grey')+
-  scale_x_log10(limits=c(5,3000), breaks=c(1, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
   theme_classic()
+
+
+prot_compare
 ```
+The vCAS protocl brings the size distribution closer to the simulated, with this persistent shoulder. Wonder what that is. My guess is that the distribution before any cleanup is so skewed to 1000+ that even with cleanup there's a lot leftover. 
 
