@@ -14,6 +14,7 @@ library(ggplot2)
 require(tidyverse)
 library(openxlsx)
 library(patchwork)
+library(ggbeeswarm)
 ```
 
 Copyright © Chandler Sutherland Email: [chandlersutherland\@berkeley.edu](mailto:chandlersutherland@berkeley.edu){.email}
@@ -83,7 +84,7 @@ pre_pcr
 
 Fragment Sizes:
 ```{r}
-frag_traces_1 %>% filter(size > 100 & size <=800)
+frag_traces_1 %>% filter(size > 100 & size <=1000) 
 ```
 
 
@@ -94,16 +95,15 @@ Measured pre-PCR libraries on 05/14 and 05/15 with a new set of standards. Used 
 How much noise am I getting? 
 
 ```{r}
+#read in conglomerate concentration data 
 pre_pcr_1 <- read.xlsx("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\Library qPCR\\E19.12 pre-pcr qpcr.xlsx", sheet='both_replicates')
 
 pre_pcr_1$date <- factor(pre_pcr_1$date, levels=c('20250514', '20250515', '20250519', '20250520', '20250521', 'average'))
-ggplot(pre_pcr_1)+
-  #geom_boxplot(aes(x=library, y=estimate))+
-  geom_point(aes(x=library, y=estimate, color=date))+
-  theme_classic()+
-  xlab('')+
-  ylab('working concentration (nM)')
 
+#start a common controls df 
+controls <- pre_pcr_1 %>% filter(str_detect(library, "^positive"))
+
+#summary statistics per day 
 my_sum <- pre_pcr_1 %>%
   group_by(library, date) %>%
   summarise( 
@@ -116,27 +116,20 @@ my_sum <- pre_pcr_1 %>%
 
 ggplot() +
   geom_bar(my_sum, mapping=aes(x=library, y=mean, fill=date), stat='identity', alpha=0.5, position='dodge') +
-#  geom_errorbar(my_sum, mapping=aes(x=library, ymin=mean-ic, ymax=mean+ic), width=0.4, alpha=0.9, position='dodge') +
   geom_point(pre_pcr_1, mapping=aes(x=library, y=estimate, color=date, shape=replicate), position=position_dodge(width=1))+
   ggtitle("Library Estimate")+
   ylab('nM')+
   theme_classic()
-
-controls <- pre_pcr_1 %>% filter(str_detect(library, "^positive"))
 ```
 
-However, serial dilutions are not true replicates. 20250519 overestimates, 20250514 underestimates, and 20250515 appears somewhat in the middle. 
+The measurements from 20250514 and 15 are close-ish, but the estimates based on dilutions are greater, showing that there is some inaccuracy in measurement. 
+
+However, serial dilutions are not true replicates. Recalculate based on actual new dilutions. 
 
 ```{r}
 pre_pcr_1_avg <- read.xlsx("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\Library qPCR\\E19.12 pre-pcr qpcr.xlsx", sheet='average')
 
 pre_pcr_1_avg$date <- factor(pre_pcr_1_avg$date, levels=c('20250514', '20250515', '20250519', '20250520', '20250521', 'average'))
-ggplot(pre_pcr_1_avg)+
-  geom_boxplot(aes(x=library, y=estimate))+
-  geom_point(aes(x=library, y=estimate, color=date))+
-  theme_classic()+
-  xlab('')+
-  ylab('working concentration (nM)')
 
 my_sum <- pre_pcr_1_avg %>%
   group_by(library) %>%
@@ -146,34 +139,13 @@ my_sum <- pre_pcr_1_avg %>%
     sd=sd(estimate, na.rm= T)
   ) %>%
   mutate( se=sd/sqrt(n))  %>%
-  mutate( ic=se * qt((1-0.05)/2 + .5, n-1))
+  mutate( ic=se * qt((1-0.05)/2 + .5, n-1)) %>%
+  mutate(cv= sd/mean*100)
 
-ggplot() +
-  geom_bar(my_sum, mapping=aes(x=library, y=mean), stat="identity", alpha=0.5) +
-  geom_errorbar(my_sum, mapping=aes(x=library, ymin=mean-ic, ymax=mean+ic), width=0.4, alpha=0.9) +
-  geom_point(pre_pcr_1_avg, mapping=aes(x=library, y=estimate, color=date))+
-  ggtitle("Average library estimate 95% confidence interval")+
-  theme_classic()
-
-pre_pcr_1_avg %>% filter(library %in% c('library 7', 'library 8', 'library 9')) %>% filter(date != '20250521') %>% group_by(library) %>% summarize(mean=mean(estimate))
+my_sum
 ```
 
-remove 20250514, can't trust it (positive control looked crazy). Take average of 20250519 and 20250515, re-dilute, re-qPCR 
-```{r}
-working_conc <- pre_pcr_1_avg %>% 
-  filter(date != '20250514') %>% 
-  filter(!(date == '20250515' & library %in% c('library 1', 'library 2', 'library 3', 'library 4', 'library 5', 'library 6'))) %>%
-  group_by(library) %>% summarize(mean=mean(estimate))
-
-ggplot() +
-  geom_bar(my_sum, mapping=aes(x=library, y=mean, fill=date), stat='identity', alpha=0.5, position='dodge') +
-  geom_boxplot(working_conc, mapping=aes(x=library, y=mean))+
-  geom_point(pre_pcr_1_avg, mapping=aes(x=library, y=estimate, color=date, shape=replicate), position=position_dodge(width=1))+
-  ggtitle("Library Estimate")+
-  ylab('nM')+
-  theme_classic()
-```
-
+Very high CV when including the dilution calculated estimates.
 
 Actual dilution results: 
 ```{r}
@@ -200,14 +172,11 @@ fmol <- ggplot(dilution_1)+
 
 nM + fmol + plot_layout(guides='collect')
 ```
-
+Take 20250514 and 15 at face value, then compare "ideal" fmol of dilution based on these, then the actual fmol of the dilution. 
 ```{r}
-pre_pcr_1 %>% filter(date %in% c('20250515', '20250514')) %>% ggplot(aes(x=library, y=estimate, color=date))+
-  geom_point()+
-  theme_classic()
-
 #load everything and calculate ideal based only on the 20250514 and 15 estimates of library size. 
-dilution_trials_1 <- pre_pcr_1 %>% filter(date %in% c('20250515', '20250514')) %>% 
+dilution_trials_1 <- pre_pcr_1 %>% 
+  filter(date %in% c('20250515', '20250514')) %>% 
   group_by(library) %>% 
   summarize(estimate=mean(estimate, na.rm=T)) %>%
   mutate(vol_0519 = c(8.20, 3.88, 3.38, 2.96, 4.63, 4.10, 2.55, 1.98, 4.72, NA, NA)) %>%
@@ -228,7 +197,7 @@ clean_dil_trial <- dilution_trials_1 %>%
   mutate(date=paste0('2025',date)) %>%
   pivot_wider(names_from=type, values_from=value)
 
-clean_dil_trial %>% group_by(date) %>% summarize(avg_conc=mean(est))
+clean_dil_trial %>% mutate(factor=est/ideal) %>% group_by(date) %>% summarize(avg_conc=mean(est), avg_factor=mean(factor))
 
 ggplot(clean_dil_trial)+
   geom_point(aes(x=ideal, y=est, color=date))+
@@ -243,16 +212,6 @@ ggplot(clean_dil_trial)+
   theme_classic()
 ```
 Ok, a lot more noise than my other graphs, so the estimates of the libraries from 20250514 and 20250515 are not super accurate. My best dilution series was 20250520, in that it was most consistently close to 0.010, but I'm like factoring in an underestimate. It's not actually that much closer to the ideal v estimate line. 
-
-
-```{r}
-dilution_1 %>% mutate(ideal_nm = 0.01) %>%
-  ggplot()+
-  geom_point(aes(x=ideal_nm, y=estimate, color=date))+
-  ylim(0, 0.022)+
-  theme_classic()
-```
-
 
 # Retry!
 Did everything on the same day, with 6 independent dilutions per library. It's time to get tennis elbow. 
@@ -270,20 +229,32 @@ pos_control <- pre_pcr_2 %>%
   mutate(date='20250527') %>% 
   subset(select=-fragment.size)
 
+#make an actual clean positive control df 
 all_controls <- rbind(pos_control, controls) %>% 
   mutate(replicate=str_replace(replicate, 'dilution', 'rep')) %>%
   mutate(library=str_trim(str_replace(library, 'positive control ', 'positive_'
-                             )))
+                             )))%>%
+  rbind(c('positive_old', 'rep 1', 0.23569239, 20250121)) %>%
+  rbind(c('positive_old', 'rep 2', 0.308177149, 20250121)) %>%
+  rbind(c('positive_old', 'rep 1', 0.296839313, 20250107)) %>%
+  rbind(c('positive_old', 'rep 2', 0.291052034, 20250107)) %>%
+  rbind(c('positive_old', 'rep 1', 0.212634199, 20250124)) %>%
+  rbind(c('positive_old', 'rep 2', 0.290635638, 20250124)) %>%
+  rbind(c('positive_old', 'rep 1', 0.197092129, 20241211)) %>%
+  rbind(c('positive_old', 'rep 2', 0.212994431, 20241211)) %>%
+  filter(date != 'average') %>%
+  mutate(estimate=as.double(estimate))
+
+all_controls %>% write_csv('pre_pcr_qPCR_positive_controls.csv')
 
 ggplot(all_controls)+
   geom_boxplot(aes(x=library, y=estimate))+
-  geom_point(aes(x=library, y=estimate, color=date, shape=replicate), position='jitter')+
-  scale_color_manual(values=c("20250527" = 'purple', "20250521"='grey', "20250514" = 'grey', "20250515" = 'grey', "20250519" = 'grey', "average" = 'red',  "20250520" = 'grey'))+
-  theme_classic()
+  geom_beeswarm(aes(x=library, y=estimate, shape=replicate), color='darkgrey')+
+  theme_classic()+
+  geom_point(all_controls %>% filter(date=='20250527'), mapping=aes(x=library, y=estimate, shape=replicate), color='purple')
 ```
 
-Within the realm of possibility. rep1 of positive old is a little low. 
-
+Within the realm of possibility. rep1 of positive old is a little low. Check out benchmarks 
 ```{r}
 bench <- pre_pcr_2 %>% filter(str_detect(library, '^benchmark')) %>% mutate(date='20250527') %>% subset(select=c(library, estimate, date))
 
@@ -308,7 +279,7 @@ ggplot(bench_comp)+
   theme_classic()+
   plot_layout(guides='collect')
 ```
-Pretty close. Except as seen previously, have a higher time with larger estimates. But otherwise ok. 
+Pretty close. Except as seen previously, have a higher time with larger estimates. But otherwise ok, proportional to size of library. 
 
 ```{r}
 lib_only <- pre_pcr_2 %>% filter(str_detect(library, '^Library'))
@@ -338,23 +309,15 @@ ggplot() +
   ylab('nM')+
   theme_classic()
 
-ggplot() +
-  geom_bar(noise_summary, mapping=aes(x=library, y=mean), stat='identity', alpha=0.5) +
-  geom_errorbar(noise_summary, mapping=aes(x=library, ymin=mean-sd, ymax=mean+sd), width=0.4, alpha=0.9, position='dodge') +
-  geom_point(lib_only, mapping=aes(x=library, y=estimate))+
-  ggtitle("Library Estimate (sd)")+
-  ylab('nM')+
-  theme_classic()
-
 noise_summary
 ```
-Pretty tight, some issue with dilution 4 library 3. Library 9 is a lot less than the others. Coefficient of variation between different measurements of the same library between 10-22% (except for Library 3). This is acceptable. 
+Pretty tight, some issue with dilution 4 library 3. Library 9 is a lot less than the others. Coefficient of variation between different measurements of the same library between 10-22% (except for Library 3). This is acceptable, and an improvement on last time. 
 
 
 ```{r}
 #ng/ul measurement
 noise_summary %>% subset(select=c(library, mean)) %>%
-  mutate(ng_ul=mean/10^6*660*517) %>% pull(ng_ul)
+  mutate(ng_ul=mean/10^6*660*517) 
 ```
 
 ## Dilution and re-measurement 
@@ -370,26 +333,22 @@ dil_2
 Once again, check controls 
 ```{r}
 pos_control <- dil_2 %>% filter(str_detect(library, '^positive')) %>% mutate(date='20250527_2') %>% subset(select=-c(fragment.size, Tube))
+
 all_controls <- rbind(pos_control, all_controls) %>% 
   mutate(replicate=str_replace(replicate, 'dilution', 'rep')) %>%
   mutate(library=str_trim(str_replace(library, 'positive control ', 'positive_'
                              )))
 
+all_controls %>% write_csv('pre_pcr_qPCR_positive_controls.csv')
+
 ggplot(all_controls)+
   geom_boxplot(aes(x=library, y=estimate))+
   geom_point(aes(x=library, y=estimate, color=date, shape=replicate), position='jitter')+
-  scale_color_manual(values=c("20250527_2" = 'purple', "20250527" = 'grey', "20250521"='grey', "20250514" = 'grey', "20250515" = 'grey', "20250519" = 'grey', "average" = 'red',  "20250520" = 'grey'))+
+  scale_color_manual(values=c("20250527_2" = 'purple', "20250527" = 'lavender'))+
   #scale_y_log10()+
   theme_classic()
 ```
-Acceptable I guess 
-
-0.1
-0.04
-0.02
-0.01
-0.005
-0.0095
+Acceptable!
 
 Is there a significant relationship between time and factor difference between ideal and estimate? Caveat: 20250527 replicates were done on the same dilutions, so I should probably average them 
 ```{r}
@@ -402,6 +361,7 @@ bench_comp_2 <- bench_comp %>% rbind(bench_2)
 ggplot(bench_comp_2)+
   geom_point(aes(x=library, y=estimate, color=date))+
   scale_y_log10()+
+  ylab('log10(nM)')+
   theme_classic()
 
 versus <- bench_comp_2 %>% 
@@ -421,7 +381,8 @@ ggplot(versus)+
   xlim(0, 0.18)+
   scale_x_log10()+
   scale_y_log10()+
-  theme_classic()
+  theme_classic()+
+  labs(title='expected vs estimated dilution concentration')
 
 factor_dif <- versus %>% mutate(dif=estimate-ideal) %>% mutate(factor=estimate/ideal) 
 
@@ -436,16 +397,13 @@ factor_dif %>%
 
 factor_dif %>% group_by(date) %>% summarize(mean(factor, na.rm=T))
 
-factor_dif
 x <- factor_dif %>% filter(date=='20250121') %>% pull(factor)
 y <- factor_dif %>% filter(date=='20250527') %>% pull(factor)
 
 t.test(x, y)
 ```
 
-There was always overestimation of libraries, and my new standards do not increase this significantly (1.4x to 1.6x)
-
-For sure. More accurate benchmark 1, less benchmark 2, otherwise pretty close. The dilution on this was crazy so handwavey anyway. Not real tech reps bc from the same dilution. 
+There was always overestimation of libraries, and my new standards do not increase this significantly (1.4x to 1.6x).
 
 In an attempt to prevent super crazy dilutions over and over, did three dilutions for each library. Tube 1 should be 0.0075, tube 2 0.01, tube 3 0.00125 
 ```{r}
@@ -492,9 +450,8 @@ Proceed with tube 1.
 
 The issue isn't inaccurate pipetting, it seems to be that no matter what there's an issue where I make the wrong estimate of the first library, leading to a inflated after dilution. This is probably because my qPCR based measurement isn't accurate, as in the standard is more accurate at certain concentrations. In my first library, I messed up my initial math and that likely compensated for this. I don't really know how to proceed with this. I wonder if that's why my standards always have messed up delta Ct values at the end. But everything I measure is in the same ballpark anyway. 
 
+Comparing benchmarks to the dilutions: 
 ```{r}
-versus
-
 more_versus <- dilution %>% 
   group_by(library, Tube) %>% 
   summarize(estimate=mean(estimate, na.rm=T)) %>% 
@@ -538,6 +495,21 @@ dil_2 %>% mutate(date='20250527')
 # Library amplification efficiency 
 WW suggested that it was a difference in primer efficiency between my standard curve and sample. Test with benchmark 20250527 and original results. 
 
+Import a random standard curve, how about from 20250527 
+```{r}
+example_sc <- read.xlsx("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\Library qPCR\\20250527.xlsx", sheet='Standard Curve', startRow=2, fillMergedCells = TRUE)  %>%
+  mutate(CT=as.double(CT)) %>%
+  rename('Ct' = 'CT', 
+         'library' = 'X5')
+
+example_sc %>% 
+  subset(select=c(library, Concentration.pM, Average.CT)) %>% 
+  unique() %>%
+  mutate(log_pM = log10(Concentration.pM))
+```
+
+
+
 ```{r}
 #start with january 2021 measurement 
 raw_1 <- read.xlsx("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\Library qPCR\\20250121 dilution curve quant 1(SYBR) recalc 20250529.xlsx", sheet='Concentration Analysis', startRow=1, fillMergedCells = TRUE)  %>%
@@ -563,45 +535,22 @@ benchmark_raw_1 <- raw_1 %>%
                               benchmark == '6' ~ 0.0095)) %>% 
   mutate(ideal_nM=case_when(dilution == '7' ~ 0.0025, 
                             .default = ideal_nM))%>%
-  mutate(log_pM = log(ideal_nM/dilution.factor*1000))
+  mutate(log_pM = log10(ideal_nM/dilution.factor*1000))
 
 model_20250121 <- lm(Average.Ct~log_pM, benchmark_raw_1)
-model_20250121[[1]][[2]]
 
-ggplot(benchmark_raw_1)+
+text_formula <- paste0("y = ", as.character(round(model_20250121[[1]][[2]], 2)), 'x + ', as.character(round(model_20250121[[1]][[1]], 2)))
+
+p0121 <- ggplot(benchmark_raw_1)+
   geom_point(aes(x=log_pM, y=Average.Ct, color=benchmark))+
   geom_abline(slope=model_20250121[[1]][[2]], intercept=model_20250121[[1]][[1]])+
-  theme_classic()
+  theme_classic()+
+  labs(title='20250121')+
+  annotate('text', label=text_formula, x=-0.5, y=21)
 ```
 
 ```{r}
-raw <- read.xlsx("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\Library qPCR\\20250527_2.xlsx", sheet='Concentration Analysis', startRow=1, fillMergedCells = TRUE)  %>%
-  mutate(Ct=as.double(Ct))
-
-benchmark_raw <- raw %>% 
-  filter(str_detect(sample, '^benchmark')) %>% 
-  subset(select=c(sample, Average.Ct, dilution.factor)) %>% 
-  unique() %>% 
-  separate(sample, into=c(NA, 'benchmark', NA, 'replicate'), sep=' ') %>%
-  mutate(ideal_nM = case_when(benchmark == '1' ~ 0.1, 
-                              benchmark == '2' ~ 0.04, 
-                              benchmark == '3' ~ 0.02, 
-                              benchmark == '4' ~ 0.01, 
-                              benchmark == '5' ~ 0.005, 
-                              benchmark == '6' ~ 0.0095)) %>% 
-  mutate(log_pM = log(ideal_nM/dilution.factor*1000))
-
-
-
-model_20250527 <- lm(Average.Ct~log_pM, benchmark_raw)
-model_20250527[[1]][[2]]
-
-ggplot(benchmark_raw)+
-  geom_point(aes(x=log_pM, y=Average.Ct, color=benchmark))+
-  geom_abline(slope=model_20250527[[1]][[2]], intercept=model_20250527[[1]][[1]])+
-  theme_classic()
-```
-```{r}
+#20250527
 raw <- read.xlsx("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\Library qPCR\\20250527.xlsx", sheet='Concentration Analysis', startRow=1, fillMergedCells = TRUE)  %>%
   mutate(Ct=as.double(Ct))
 
@@ -616,16 +565,197 @@ benchmark_raw <- raw %>%
                               benchmark == '4' ~ 0.01, 
                               benchmark == '5' ~ 0.005, 
                               benchmark == '6' ~ 0.0095)) %>% 
-  mutate(log_pM = log(ideal_nM/dilution.factor*1000))
-
-
+  mutate(log_pM = log10(ideal_nM/dilution.factor*1000))
 
 model_20250527 <- lm(Average.Ct~log_pM, benchmark_raw)
-model_20250527[[1]][[2]]
+summary(model_20250527)
 
-ggplot(benchmark_raw)+
+text_formula <- paste0("y = ", as.character(round(model_20250527[[1]][[2]], 2)), 'x + ', as.character(round(model_20250527[[1]][[1]], 2)))
+
+p0527 <- ggplot(benchmark_raw)+
   geom_point(aes(x=log_pM, y=Average.Ct, color=benchmark))+
   geom_abline(slope=model_20250527[[1]][[2]], intercept=model_20250527[[1]][[1]])+
+  labs(title='20250527')+
+  annotate('text', label=text_formula, x=-0.5, y=21)+
   theme_classic()
 ```
 
+
+
+```{r}
+#20250527_2
+raw_2 <- read.xlsx("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\Library qPCR\\20250527_2.xlsx", sheet='Concentration Analysis', startRow=1, fillMergedCells = TRUE)  %>%
+  mutate(Ct=as.double(Ct))
+
+benchmark_raw_2 <- raw_2 %>% 
+  filter(str_detect(sample, '^benchmark')) %>% 
+  subset(select=c(sample, Average.Ct, dilution.factor)) %>% 
+  unique() %>% 
+  separate(sample, into=c(NA, 'benchmark', NA, 'replicate'), sep=' ') %>%
+  mutate(ideal_nM = case_when(benchmark == '1' ~ 0.1, 
+                              benchmark == '2' ~ 0.04, 
+                              benchmark == '3' ~ 0.02, 
+                              benchmark == '4' ~ 0.01, 
+                              benchmark == '5' ~ 0.005, 
+                              benchmark == '6' ~ 0.0095)) %>% 
+  mutate(log_pM = log10(ideal_nM/dilution.factor*1000))
+
+
+
+model_20250527_2 <- lm(Average.Ct~log_pM, benchmark_raw_2)
+model_20250527_2[[1]][[2]]
+summary(model_20250527_2)
+
+text_formula <- paste0("y = ", as.character(round(model_20250527_2[[1]][[2]], 2)), 'x + ', as.character(round(model_20250527_2[[1]][[1]], 2)))
+
+p0527_2 <- ggplot(benchmark_raw_2)+
+  geom_point(aes(x=log_pM, y=Average.Ct, color=benchmark))+
+  geom_abline(slope=model_20250527_2[[1]][[2]], intercept=model_20250527_2[[1]][[1]])+
+  theme_classic()+
+  labs(title='20250527_2')+
+  annotate('text', label=text_formula, x=-0.5, y=21)
+```
+
+```{r}
+p0121 + p0527 + p0527_2 + plot_layout(guides='collect')
+```
+
+Standard curve slopes between -3.1 and -3.6 are good (as shown here). Could adopt this as a new standard curve should I choose? Does that change the outcome of concentration? 
+
+```{r}
+stand_comp_1 <- raw %>% 
+  filter(sample != 'ntc') %>% 
+  filter(!str_detect(sample, '^bench')) %>% 
+  subset(select=c(sample, Average.Ct, dilution.factor, fragment.size, `nM.(fmol/uL)`))%>%
+  unique() %>%
+  mutate(bench_calc_pmol = 10^((Average.Ct-model_20250527[[1]][[1]])/model_20250527[[1]][[2]])) %>%
+  mutate(bench_calc_nM = bench_calc_pmol*dilution.factor*319/fragment.size/1000) %>%
+  rename('standard_nM' = 'nM.(fmol/uL)') %>%
+  subset(select=c(sample, standard_nM, bench_calc_nM))%>%
+  mutate(date='20250527')
+
+stand_comp_2 <- raw_2 %>% 
+  filter(sample != 'ntc') %>% 
+  filter(!str_detect(sample, '^bench')) %>% 
+  subset(select=c(sample, Average.Ct, dilution.factor, fragment.size, `nM.(fmol/uL)`))%>%
+  unique() %>%
+  mutate(bench_calc_pmol = 10^((Average.Ct-model_20250527_2[[1]][[1]])/model_20250527_2[[1]][[2]])) %>%
+  mutate(bench_calc_nM = bench_calc_pmol*dilution.factor*319/fragment.size/1000) %>%
+  rename('standard_nM' = 'nM.(fmol/uL)') %>%
+  subset(select=c(sample, standard_nM, bench_calc_nM)) %>%
+  mutate(date='20250527_2')
+
+stand_comp <- rbind(stand_comp_1, stand_comp_2)
+
+s1 <- stand_comp %>%
+  ggplot()+
+  geom_point(aes(x=standard_nM, y=bench_calc_nM, color=date))+
+  geom_abline(slope=1, intercept=0)+
+  ylim(0, 0.3)+
+  xlim(0, 0.3)+
+  theme_classic() +
+  ylab('benchmark nM')+
+  xlab('standard nM')#+
+ # scale_y_log10()+
+#  scale_x_log10()
+
+s2 <- stand_comp %>%
+  ggplot()+
+  geom_point(aes(x=standard_nM, y=bench_calc_nM, color=date))+
+  geom_abline(slope=1, intercept=0)+
+  theme_classic() +
+  scale_y_log10()+
+  scale_x_log10()+
+  ylab('log10(benchmark nM)')+
+  xlab('log10(standard nM)')
+
+s1 + s2 + plot_layout(guides='collect')
+```
+
+```{r}
+s_lib_comp <- stand_comp_1 %>% 
+  filter(str_detect(sample, '^library')) %>%
+  separate(sample, into=c(NA, 'library', NA, 'dilution'), sep=' ') %>%
+  group_by(library) %>%
+  summarize(standard_nM = mean(standard_nM), 
+            bench_calc_nM = mean(bench_calc_nM)) %>%
+  mutate(factor=standard_nM/bench_calc_nM) %>% 
+  mutate(library=paste('library', library))
+
+s_lib_comp_dilutions <- stand_comp_2 %>% 
+  filter(str_detect(sample, '^library')) %>%
+  separate(sample, into=c('library', 'lib_num', 'dilution', 'dil_number')) %>%
+  mutate(library=paste(library, lib_num)) %>%
+  mutate(dilution = paste(dilution, dil_number)) %>%
+  mutate(Tube=case_when(dilution %in% c('dilution 1', 'dilution 4') ~ 'Tube 1', 
+                        dilution %in% c('dilution 2', 'dilution 5') ~ 'Tube 2',
+                        dilution %in% c('dilution 3', 'dilution 6') ~ 'Tube 3')) %>%
+  subset(select=c(library, Tube, standard_nM, bench_calc_nM)) %>%
+  mutate(factor=standard_nM/bench_calc_nM)
+  
+
+ggplot(s_lib_comp_dilutions)+
+  geom_hline(yintercept=0.01, color='#00BA38')+
+  geom_hline(yintercept=0.0075, color='#F8766D')+
+  geom_hline(yintercept=0.0125, color='#619CFF')+
+  geom_boxplot(aes(x=library, y=bench_calc_nM, color=Tube))+
+  theme_classic()+
+  ylim(0, 0.03)+
+  xlab('')+
+  ylab('working concentration (nM)')
+```
+
+Check linearity....
+
+```{r}
+s_lib_est <- s_lib_comp_dilutions  %>% group_by(library, Tube) %>%
+  summarize(standard_nM=mean(standard_nM, na.rm = T),
+            bench_calc_nM=mean(bench_calc_nM, na.rm=T), 
+            factor=mean(factor, na.rm=T)) %>%
+  arrange(Tube, library) %>% 
+  add_column(df=c(13.76, 12.07, 14.87, 13.18, 11.38, 9.11, 9.40, 10.89, 4.47, 10.32, 9.05, 11.15, 9.88, 8.53, 6.83, 7.05, 8.17, 3.35, 8.25, 7.24, 8.92, 7.91, 6.83, 5.47, 5.64, 6.53, 2.68)) %>%
+  mutate(standard_lib_est = standard_nM*df, 
+         bench_lib_est = bench_calc_nM*df) %>%
+  subset(select=c(library, Tube, standard_lib_est, bench_lib_est)) %>% 
+  mutate(estimation = 'from_dilution')
+
+slib <- s_lib_comp %>% 
+  pivot_longer(names_to = 'standard', cols=c(standard_nM, bench_calc_nM)) %>% 
+  subset(select=-factor) %>%
+  mutate(date='20250527') %>%
+  mutate(standard=case_when(standard=='standard_nM' ~ 'gblock', 
+                            standard=='bench_calc_nM' ~ 'benchmark'))
+
+sdil <- s_lib_est %>% 
+  pivot_longer(names_to='standard', cols=c(standard_lib_est, bench_lib_est)) %>%
+  mutate(standard=case_when(standard=='standard_lib_est' ~ 'gblock', 
+                            standard=='bench_lib_est' ~ 'benchmark'))
+
+ggplot()+
+  geom_bar(slib, mapping=aes(x=library, y=value), stat='identity')+
+  geom_point(sdil, mapping=aes(x=library, y=value))+
+  theme_classic()+
+  facet_wrap(~standard)
+
+comparison <- sdil %>% 
+  group_by(library, standard) %>% 
+  summarize(value=mean(value)) %>% 
+  mutate(date='20250527_2') %>%
+  rbind(slib) %>%
+  pivot_wider(names_from=date, values_from=value) %>%
+  mutate(factor=`20250527_2`/`20250527`) 
+
+comparison %>% 
+  ggplot()+
+  geom_point(aes(x=`20250527`, `20250527_2`, color=standard))+
+  theme_classic()+
+  geom_abline(intercept=0, slope=1)+
+  xlim(0, 0.15)+
+  ylim(0, 0.15)
+
+comparison%>%
+  group_by(standard)%>%
+  summarize(factor=mean(factor))
+```
+
+For both benchmark and gblock, nonlinearity. Oh well! Continue with standards, as that is what everything is relative to, and technically smaller overestimation factor than benchmark. Very consistent with overestimation factor 
