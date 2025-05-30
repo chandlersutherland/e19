@@ -1,0 +1,268 @@
+---
+title: "e19.10_dilution_curve_prep_qc"
+author: "Chandler Sutherland"
+date: "2025-01-28"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ggplot2)
+require(tidyverse)
+library(openxlsx)
+library(patchwork)
+```
+
+Copyright © Chandler Sutherland Email: [chandlersutherland\@berkeley.edu](mailto:chandlersutherland@berkeley.edu){.email}
+
+Purpose: produce a custom QC report for the E19.10 experiment. 
+
+All of these libraries are based on the same gDNA source: Col-0 planting ID 1 plant ID 8. Libraries 19-24 are based on the same pre-PCR library following the nanoseq vCAS protocol, while Library 25 is from a different pre-PCR library following the nanoseq protocol as published. Libraries 19-24 were diluted to different magnitudes before PCR amplification. 
+
+# CS19-24 (dilutions)
+
+Beginning with nanoseq vCAS: 
+
+- performed a step 0 ampure bead cleanup (1x) to remove the AE buffer I decided to elute in (don't do again)
+- of the 4 gDNA samples (plants 7-10), I added H2O to get 4 2.5 ng/ul samples in 250ul. 
+- eluted in 25ul, 20ul for nanoseq vCAS and 5ul for QC
+
+## Pre-pcr quantification and library size 
+
+```{r}
+cleanup_1 <- data.frame(
+  plant_id = c(7:10), 
+  quibit_conc = c(16.1, 10.2, 17.0, 16.7)) %>%
+  mutate(ng_yield = quibit_conc*20) %>% 
+  mutate(percent_recover=ng_yield/625*100)
+
+cleanup_1
+```
+
+recovered 30-53% of gDNA from original
+
+Started the nanoseq protocolvCAS, including bead cleanup, fragmentation, A-tailing, ligation, and a two sided bead cleanup. Elute in 50ul NFW, and do qPCR, quibit, and frag analyzer. 
+
+Frag analyzer submission #: M005770_CS 
+qPCR result: 20250107 library check
+qPCR method: SYBR qPCR 2 (quibit estimate of libraries)
+
+```{r}
+lib_pt1 <- data.frame(
+  plant_id = c(7:10),
+  quibit_conc = c(2.86, 1.49, 3.23, 2.01), #ng/ul
+  avg_frag_size = c(395, 399, 466, 407), #from smear analysis 
+  frag_conc = c(1.26, 0.66, 1.24, 0.95), #from smear analysis 
+  qpcr_sybr_2 = c(0.213, 0.165, 0.155, 0.104) #nM 
+  ) %>%
+  mutate(fmol_yield=qpcr_sybr_2*50) %>%
+  mutate(qpcr_ng_ul=qpcr_sybr_2/10^6*660*avg_frag_size) %>%
+  mutate(ng_yield=qpcr_ng_ul*50)
+
+yield_1 <- merge(cleanup_1, lib_pt1, by = 'plant_id') %>% 
+  mutate(percent_ng_yield=ng_yield.y/ng_yield.x*100) %>% 
+  subset(select=c(plant_id, avg_frag_size, qpcr_sybr_2, fmol_yield, percent_ng_yield))
+
+yield_1
+```
+Relative to the amount of DNA input into the first part of the pipeline, only recover 0.4-1%. However, this is plenty of fmol to work with before PCR amplification. 
+
+
+Look at the fragment distribution: 
+```{r}
+#load data 
+frag_traces_1 <- read_csv("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\fragment analysis\\20250114\\2025 01 10 17H 40M Electropherogram (1).csv") %>%
+  pivot_longer(cols=starts_with('F'), names_to='sample', values_to='Intensity') %>% 
+  separate('sample', c(NA, 'sample'))  %>% 
+  rename(size = `Size (bp)`) %>% 
+  mutate(plant_id=case_when(sample=='CS14' ~ 7, 
+                            sample=='CS15' ~ 8,
+                            sample=='CS16' ~ 9, 
+                            sample=='CS17' ~ 10))
+
+frag_traces_1$plant_id <- as.factor(frag_traces_1$plant_id)
+
+pre_pcr <- ggplot() +
+  geom_line(data=frag_traces_1, aes(x=size, y= Intensity, color=plant_id))+
+  scale_x_log10(limits=c(5,NA), breaks=c(1, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
+  theme_classic()+
+  geom_vline(xintercept=200, linetype=2, color='grey')+
+  geom_vline(xintercept=1000, linetype=2, color='grey')
+
+pre_pcr
+```
+8 and 10 have the best curves, 8 has more fmol. Proceed with this prep for sequencing. 
+
+## Dilution and re-qPCR 
+
+The goal of this experiment is a dilution curve for eventual sequencing. So dilute the 8 pre-PCR library above across a range of values. Then qPCR check with SYBR. Attempted to KAPA check, only got two samples. Estimate the rest with KAPA conversion factor (see qpcr_troubleshooting.Rmd)
+
+```{r}
+lib8_nM <- 0.165	#used the smear analysis frag size instead of smooth. This is what is sequenceable. So add nM_estimated, which is 
+
+dilution <- data.frame(
+  lib_id = c('CS_19', 'CS_20', 'CS_21', 'CS_22', 'CS_23', 'CS_24'), 
+  fmol_input_ideal = c(2, 1, 0.5, 0.25, 0.125, 0.0625), 
+  vol_added = c(12.11, 4.84, 2.42, 1.21, 0.60, 0.30)) %>%
+  mutate(nM_ideal = fmol_input_ideal/20)
+```
+
+SYBR_qPCR results: 20250121 dilution curve quant 1(SYBR)
+KAPA_qPCR results: 20250122 dilution curve quant 2.1(KAPA)
+```{r}
+kapa_factor <- 2.56887
+measured_dilution <- dilution %>% 
+  mutate(sybr_qpcr_2 = c(0.0818, 0.0452, 0.0281, 0.0101, 0.0062, 0.0039)) %>%
+  mutate(kapa_measured = c(NA, 0.0672, 0.0315, NA, NA, 0.0049)) %>%
+  mutate(kapa_estimated=sybr_qpcr_2*kapa_factor)
+
+#apples to apples SYBR comparison 
+dilution_sybr_nM <- measured_dilution %>% subset(select=c(lib_id, nM_ideal, sybr_qpcr_2)) %>%
+  mutate(percent_dif = (nM_ideal-sybr_qpcr_2)/nM_ideal*100)
+
+dilution_sybr_nM
+
+dilution_fmol <- measured_dilution %>% 
+  mutate(sybr_fmol = sybr_qpcr_2*20, kapa_fmol=kapa_estimated*20) %>% 
+  subset(select=c(lib_id, fmol_input_ideal, sybr_fmol, kapa_fmol))
+```
+
+Pretty close to the dilution values I had hoped. This particular qPCR also had high variation between replicates, so may be ok to go with nM ideal. 
+
+## Post-PCR quantification and fragment distribution
+
+SYBR qPCR: 20250123 library quant sybr and nano AND 20250128 library quant sybr, see 19.10 calibration benchling for more details 
+
+```{r}
+post_pcr <- dilution %>% subset(select=c(lib_id, fmol_input_ideal, nM_ideal)) %>%
+  mutate(sybr_qpcr_2 = c(32.513, 11.115, 19.339, 11.459, 2.050, 3.870)) %>%
+  mutate(avg_frag_size=c(523, 545, 518, 483, 582, 392)) %>% 
+  mutate(frag_conc = c(9.9645, 3.6445, 7.7771, 3.7213, 1.0226, 0.7635)) %>%
+  mutate(quibit_conc = c(13.3, 6.44, 11.6, 5.42, 1.73, 1.13))
+
+post_pcr
+
+pcr_effi <- post_pcr %>% mutate(pcr_cycles = c(11:16)) %>%
+  mutate(fmol_output_ideal = fmol_input_ideal*2^pcr_cycles) %>%
+  mutate(fmol_output_sybr = sybr_qpcr_2*50) %>%
+  mutate(pcr_yield = fmol_output_sybr/fmol_output_ideal*100) %>% subset(select=c(lib_id, 
+                                                                                 fmol_output_ideal,
+                                                                                 fmol_output_sybr,
+                                                                                 pcr_cycles,
+                                                                                 pcr_yield))
+
+pcr_effi
+```
+
+There's more I need to do here (or could do here) with calculating PCR efficiency/cleanup efficiency and check what happened with CS_23/24 
+
+Fragments! 
+fragment size distribution: 20250124 pilot v 2 post pcr/M005825_CS
+```{r}
+#load data 
+frag_traces_2 <- read_csv("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\fragment analysis\\20250124 pilot v 2 post pcr\\2025 01 22 16H 57M Electropherogram.csv") %>%
+  pivot_longer(cols=starts_with('E'), names_to='sample', values_to='Intensity') %>% 
+  separate('sample', c(NA, 'sample'))  %>% 
+  rename(size = `Size (bp)`) %>% 
+  mutate(sample=case_when(sample=='CS19' ~ 'CS_19', 
+                            sample=='CS20' ~ 'CS_20',
+                            sample=='CS21' ~ 'CS_21', 
+                            sample=='CS22' ~ 'CS_22', 
+                            sample=='CS23' ~ 'CS_23', 
+                            sample=='CS24' ~ 'CS_24'))
+
+frag_traces_2$sample <- as.factor(frag_traces_2$sample)
+
+#plot!
+post_pcr_plot <- ggplot() +
+  geom_line(data=frag_traces_2, aes(x=size, y= Intensity, color=sample))+
+  scale_x_log10(limits=c(5,NA), breaks=c(1, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
+  theme_classic()+
+  geom_vline(xintercept=200, linetype=2, color='grey')+
+  geom_vline(xintercept=1000, linetype=2, color='grey')
+
+post_pcr_plot
+```
+
+The plots look similar to the distributions reported by novogene for the finished libraries: same multi-modal peaks across libraries, same-ish distribution. I think CS_23 and 24 if they were more concentrated would look the same. Overall OK, and similar enough for sequencing that I should be alright. 
+
+
+# CS25 (control)
+
+CS25 was prepped using the standard library protocol. Started with 12.5ul of Col-0 8 gDNA + 7.5ul H2O (50ng). Did not do fragment analysis at the pre-pcr stage. 
+
+## Pre-pcr quantification
+```{r}
+lib_pt2 <- data.frame(
+  rep_id = c(1, 2),
+  #quibit_conc = c(NA, NA), #ng/ul
+  #avg_frag_size = c(NA, NA), #from smear analysis 
+  #frag_conc = c(NA, NA), #from smear analysis 
+  qpcr_sybr_2 = c(0.1998, 0.0843), #nM 
+  qpcr_kapa = c(0.196, 0.1519)
+  ) %>%
+  mutate(fmol_yield=qpcr_sybr_2*50) %>%
+  mutate(qpcr_ng_ul=qpcr_sybr_2/10^6*660*573) %>% #use average fragment size at this step 
+  mutate(ng_yield=qpcr_ng_ul*50) %>% 
+  mutate(percent_ng_yield=ng_yield/50*100) %>%
+  mutate(fmol_per_ng=fmol_yield/50)
+
+lib_pt2
+```
+
+Recovered 3 and 7% of the input ng. This is less than my previous library prep using standard nano protocol (10-30%), and the reported recovery is higher. The fmol/input ng reported in the bottleneck optimization document is 0.35. Within previous runs though (0.1-0.34 fmol/ng). Higher than vCAS, which has ~1% recovery, but not by that much. 
+
+## Post-PCR quantification and fragment analysis 
+
+Moved forward with rep 2. Since we are following nanoseq as published, use the KAPA value. The presumed ideal is 0.5fmol (KAPA)/0.194 fmol (SYBR). Took 2.88ul of rep 2 for 25ul (extra few ul for qPCR in the future should I so choose). 20ul forward to PCR, 15 cycles. 
+
+```{r}
+post_pcr_2 <- data.frame(
+  lib_id = c('CS_25'), 
+  fmol_input_ideal = c(0.194), 
+  sybr_qpcr_2 = c(5.163), 
+  avg_frag_size=c(692), 
+  frag_conc=c(3.391),
+  quibit_conc=c(6.37)) %>%
+  mutate(nM_ideal=fmol_input_ideal/20)
+
+pcr_effi_2 <- post_pcr_2 %>% mutate(pcr_cycles = c(15)) %>%
+  mutate(fmol_output_ideal = fmol_input_ideal*2^pcr_cycles) %>%
+  mutate(fmol_output_sybr = sybr_qpcr_2*50) %>%
+  mutate(pcr_yield = fmol_output_sybr/fmol_output_ideal*100) %>% subset(select=c(lib_id, 
+                                                                                 fmol_output_ideal,
+                                                                                 fmol_output_sybr,
+                                                                                 pcr_cycles,
+                                                                                 pcr_yield))
+
+pcr_effi_2
+```
+Slightly higher fmol output ideal, but this input is between cycle recommendations. Similar % yield as the other low input libraries. PCR is just more efficient at higher concentrations I think. 
+
+Fragment!
+```{r}
+#load data 
+frag_traces_25 <- read_csv("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\fragment analysis\\20250124 pilot v 2 post pcr\\2025 01 24 17H 38M Electropherogram.csv") %>%
+  rename(size = `Size (bp)`, Intensity=`B10: CS_25`) %>% 
+  mutate(sample='CS_25')
+
+frag_traces_25$sample <- as.factor(frag_traces_25$sample)
+
+#plot!
+post_pcr_plot2 <- ggplot() +
+  geom_line(data=frag_traces_25, aes(x=size, y= Intensity, color=sample))+
+  scale_x_log10(limits=c(5,NA), breaks=c(1, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
+  theme_classic()+
+  geom_vline(xintercept=200, linetype=2, color='grey')+
+  geom_vline(xintercept=1000, linetype=2, color='grey')
+
+post_pcr_plot2
+```
+
+# Summary 
+
+Nanoseq vCAS recovers 0.5-1% of input gDNA, with improved fragment analyzer peaks compared to 7% in Nanoseq as is. 
+
