@@ -1,0 +1,492 @@
+---
+title: "E19.12.2_qc_lib_prep_final"
+author: "Chandler Sutherland"
+date: "2025-06-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(ggplot2)
+require(tidyverse)
+library(openxlsx)
+library(patchwork)
+library(ggbeeswarm)
+```
+
+Copyright © Chandler Sutherland Email: [chandlersutherland\@berkeley.edu](mailto:chandlersutherland@berkeley.edu){.email}
+
+Purpose: produce a custom QC report for the E19.12 experiment. 
+
+## Yield 
+
+Two components on yield: the pre PCR input and the post PCR. This will inform how many cycles to do next time and if my input is appropriate. 14 cycles this time. Started with 500ng of each gDNA sample. An extra ampure step at the beginning so that volume is consistent going in to the protocol. 
+
+```{r}
+#quibit estimates of yield 
+quibit_yield <- data.frame(library=c('library 1', 'library 2', 'library 3', 'library 4', 'library 5', 'library 6', 'library 7', 'library 8', 'library 9'), 
+           quibit_pre_pcr=c(1.01, 0.787, 0.887, 0.767, 0.652, 0.640, 0.740, 0.527, 0.411), 
+           quibit_post_pcr=c(6.48, 3.75, 3.03, 5.09, 6.04, 3.47, 7.27, 5.59, 4.46)) %>% 
+  mutate(input=500) %>%
+  mutate(pre_pcr_yield=quibit_pre_pcr*100)%>%
+  mutate(post_pcr_yield=quibit_post_pcr*50)
+
+q_yield <-  quibit_yield %>% 
+  subset(select=c(library, input, pre_pcr_yield, post_pcr_yield)) %>% 
+  pivot_longer(cols=!library, names_to='timepoint', values_to='ng')
+  
+q_yield$timepoint <- factor(q_yield$timepoint, levels=c('input', 'pre_pcr_yield', 'post_pcr_yield'))
+
+ggplot(q_yield, aes(x=timepoint, y=ng, color=library, group=library))+
+  geom_point()+
+  geom_line()+
+  ylab('ng yield')+
+  theme_classic()
+
+quibit_yield %>% mutate(pre_pcr_percent=quibit_pre_pcr/input*100) %>% subset(select=c(library, pre_pcr_percent))
+
+metric_table <- quibit_yield %>% subset(select=c(library, quibit_pre_pcr, quibit_post_pcr))
+```
+
+Recovered 0.08-0.17% of the input ng before PCR. Less than last library prep (0.4-1%), but I also started with more that time, and maybe % yield is dependent on input. Still plenty of library for amplification. 
+
+## Fragment Distribution 
+
+### Pre-pcr 
+Pre-pcr:M006217_CS
+
+I did normalize by concentration before submitting, so that was less of a factor in the trace estimates of average fragment. In general, I think more concentrated is better. 
+
+Col-0 gDNA 7	CS35
+Col-0 gDNA 9 	CS36
+Col-0 gDNA 10 	CS37
+msh2 gDNA 2	CS38
+msh2 gDNA 4	CS39
+msh2 gDNA 7	CS40
+uni1d gDNA 1	CS41
+uni1d gDNA 2	CS42
+uni1d gDNA 3	CS43
+
+```{r}
+pre_pcr_smear <- data.frame(library=c('library 1', 'library 2', 'library 3', 'library 4', 'library 5', 'library 6', 'library 7', 'library 8', 'library 9'), 
+                       avg_frag = c(474, 405, 463, 412, 401, 428, 475, 389, 383), 
+                       percent_200_1000 = c(76.2, 69.9, 77.7, 71.3, 68.2, 73.9, 76.3, 65.0, 60.5))
+
+pre_pcr_smear %>% pull(avg_frag) %>% mean()
+
+metric_table <- pre_pcr_smear %>% 
+  subset(select=-percent_200_1000) %>% 
+  rename('frag_pre_pcr'='avg_frag') %>% 
+  merge(metric_table, on=library)
+```
+
+```{r}
+#load data to plot 
+run_1 <- read_csv("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\fragment analysis\\20250603 pre pcr 2\\2025 06 02 15H 25M Electropherogram.csv") %>%
+  pivot_longer(cols=c(`H5: CS39`,`H6: CS43`), names_to='sample', values_to='Intensity') 
+
+run_2 <- read_csv("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\fragment analysis\\20250603 pre pcr 2\\2025 06 02 14H 20M Electropherogram.csv") %>%
+  pivot_longer(cols=c(`G9: CS35`,`G11: CS42`), names_to='sample', values_to='Intensity') 
+
+run_3 <- read_csv("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\fragment analysis\\20250603 pre pcr 2\\2025 06 02 11H 53M Electropherogram.csv") %>%
+  pivot_longer(cols=`E6: CS36`:`E11: CS41`, names_to='sample', values_to='Intensity') 
+
+
+frag_traces_1 <- rbind(run_1, run_2, run_3) %>% 
+  separate('sample', c(NA, 'sample_number')) %>% 
+  rename(size = `Size (bp)`) %>% 
+  mutate(Library=case_when(sample_number=='CS35' ~ 'Library 1', 
+                            sample_number=='CS36' ~ 'Library 2',
+                            sample_number=='CS37' ~ 'Library 3', 
+                            sample_number=='CS38' ~ 'Library 4', 
+                            sample_number=='CS39' ~ 'Library 5', 
+                            sample_number=='CS40' ~ 'Library 6', 
+                            sample_number=='CS41' ~ 'Library 7', 
+                            sample_number=='CS42' ~ 'Library 8', 
+                            sample_number=='CS43' ~ 'Library 9'
+                            ))%>%
+  mutate(plant_id=case_when(sample_number=='CS35' ~ 'Col0_7', 
+                            sample_number=='CS36' ~ 'Col0_9',
+                            sample_number=='CS37' ~ 'Col0_10', 
+                            sample_number=='CS38' ~ 'msh2_2', 
+                            sample_number=='CS39' ~ 'msh2_4', 
+                            sample_number=='CS40' ~ 'msh2_7', 
+                            sample_number=='CS41' ~ 'uni1d_1', 
+                            sample_number=='CS42' ~ 'uni1d_2', 
+                            sample_number=='CS43' ~ 'uni1d_3'
+                            )) %>%
+  separate(plant_id, sep='_', into=c('genotype', NA), remove=FALSE)
+
+frag_traces_1$plant_id <- as.factor(frag_traces_1$plant_id)
+
+pre_pcr_2 <- ggplot() +
+  geom_line(data=frag_traces_1, aes(x=size, y= Intensity, color=plant_id))+
+  scale_x_log10(limits=c(10,NA), breaks=c(10, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
+  ylim(0, 2000)+
+  theme_classic()+
+  geom_vline(xintercept=200, linetype=2, color='grey')+
+  geom_vline(xintercept=1000, linetype=2, color='grey')+
+  facet_wrap(~genotype)
+
+pre_pcr_2
+```
+### Post-pcr
+Post PCR: M006241_CS
+
+I did normalize by concentration before submitting, so that was less of a factor in the trace estimates of average fragment. In general, I think more concentrated is better. 
+
+Col-0 gDNA 7	CS44
+Col-0 gDNA 9 	CS45
+Col-0 gDNA 10 	CS46
+msh2 gDNA 2	CS47
+msh2 gDNA 4	CS48
+msh2 gDNA 7	CS49
+uni1d gDNA 1	CS50
+uni1d gDNA 2	CS51
+uni1d gDNA 3	CS52
+
+```{r}
+post_pcr_smear <- data.frame(library=c('library 1', 'library 2', 'library 3', 'library 4', 'library 5', 'library 6', 'library 7', 'library 8', 'library 9'), 
+                       avg_frag = c(594, 515, 588, 537, 531, 585, 582, 506, 577), 
+                       percent_200_1000 = c(92.8, 97.3, 94.8, 97.5, 97.2, 95.3, 92.9, 98.4, 94.9))
+
+post_pcr_smear %>% pull(avg_frag) %>% mean()
+
+metric_table <- post_pcr_smear %>% 
+  subset(select=-percent_200_1000) %>% 
+  rename('frag_post_pcr'='avg_frag') %>% 
+  merge(metric_table, on=library)
+```
+
+Larger average fragment size, but almost everything within 200-1000. 
+
+```{r}
+#load data to plot 
+run_4 <- read_csv("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\fragment analysis\\20250604 post pcr\\2025 06 04 19H 45M Electropherogram.csv") %>%
+  pivot_longer(cols=`E1: CS44`:`E9: CS52`, names_to='sample', values_to='Intensity') 
+
+frag_traces_2 <- run_4 %>% 
+  separate('sample', c(NA, 'sample_number')) %>% 
+  rename(size = `Size (bp)`) %>% 
+  mutate(Library=case_when(sample_number=='CS44' ~ 'Library 1', 
+                            sample_number=='CS45' ~ 'Library 2',
+                            sample_number=='CS46' ~ 'Library 3', 
+                            sample_number=='CS47' ~ 'Library 4', 
+                            sample_number=='CS48' ~ 'Library 5', 
+                            sample_number=='CS49' ~ 'Library 6', 
+                            sample_number=='CS50' ~ 'Library 7', 
+                            sample_number=='CS51' ~ 'Library 8', 
+                            sample_number=='CS52' ~ 'Library 9'
+                            ))%>%
+  mutate(plant_id=case_when(sample_number=='CS44' ~ 'Col0_7', 
+                            sample_number=='CS45' ~ 'Col0_9',
+                            sample_number=='CS46' ~ 'Col0_10', 
+                            sample_number=='CS47' ~ 'msh2_2', 
+                            sample_number=='CS48' ~ 'msh2_4', 
+                            sample_number=='CS49' ~ 'msh2_7', 
+                            sample_number=='CS50' ~ 'uni1d_1', 
+                            sample_number=='CS51' ~ 'uni1d_2', 
+                            sample_number=='CS52' ~ 'uni1d_3'
+                            )) %>%
+  separate(plant_id, sep='_', into=c('genotype', NA), remove=FALSE)
+
+frag_traces_2$plant_id <- as.factor(frag_traces_2$plant_id)
+
+post_pcr_2 <- ggplot() +
+  geom_line(data=frag_traces_2, aes(x=size, y= Intensity, color=plant_id))+
+  scale_x_log10(limits=c(10,NA), breaks=c(10, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
+  ylim(0, 2000)+
+  theme_classic()+
+  geom_vline(xintercept=200, linetype=2, color='grey')+
+  geom_vline(xintercept=1000, linetype=2, color='grey')+
+  facet_wrap(~genotype)
+
+post_pcr_2
+```
+
+```{r}
+frag_traces_1 %>% mutate(pcr='pre') %>% rbind(frag_traces_2 %>% mutate(pcr='post')) %>%
+  ggplot() +
+  geom_line(aes(x=size, y= Intensity, color=pcr))+
+  scale_x_log10(limits=c(10,NA), breaks=c(10, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
+  ylim(0, 2000)+
+  theme_classic()+
+  geom_vline(xintercept=200, linetype=2, color='grey')+
+  geom_vline(xintercept=1000, linetype=2, color='grey')+
+  facet_wrap(~plant_id)
+```
+
+```{r}
+size_dif <- pre_pcr_smear %>% mutate(pcr='pre') %>%
+  rbind(post_pcr_smear %>% mutate(pcr='post')) %>%
+  subset(select=-percent_200_1000)%>%
+  pivot_wider(names_from=pcr, values_from=avg_frag) %>%
+  mutate(dif=post-pre)
+
+size_dif %>% pull(post) %>% mean()
+```
+Expect primers to add 2*37 bp to each fragment. So there must be some enrichment of larger fragments that get amplified. Or the smaller parts of my trace are not amplifiable, or less accurate estimate at lower concentration. 
+
+### Final 
+Final pooled fragment distribution: M006248_CS
+
+```{r}
+frag_traces_3 <- read_csv("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\fragment analysis\\20250610 pool\\2025 06 09 17H 17M Electropherogram.csv") %>% 
+  rename(size = `Size (bp)`, KVKCS002 = `F2: KVKCS002`)
+
+frag_traces_3 %>% ggplot() +
+  geom_line(aes(x=size, y= KVKCS002))+
+  scale_x_log10(limits=c(10,NA), breaks=c(10, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
+  ylim(0, 2000)+
+  theme_classic()+
+  geom_vline(xintercept=200, linetype=2, color='grey')+
+  geom_vline(xintercept=1000, linetype=2, color='grey')+
+  annotate('text', x=558, y=2000, label='558')+
+  xlab('Size (bp)')+
+  ylab('Intensity')+
+  labs(title='KVKCS002 pool fragment distribution')
+```
+
+The average of the post-PCR smear analysis was 557, so this is right on the money. Cool!
+
+## qPCR concentration 
+
+3 measurements: initial estimate of the library, estimate of the dilution, and post-PCR quantification before pooling. Changes to analysis: set baseline manually: 1-3 cycles, then Ct threshold to 0.2-0.5 depending on the run.
+
+### Pre-PCR
+Initial library estimate: 2025052. This is the updated, standardized estimates (not necessarily what I thought the first time around). For that, see the other E19.12 qc library prep document 
+
+```{r}
+pre_pcr_q <- read.xlsx("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\Library qPCR\\20250527 - frag update - 0610 recalc.xlsx", sheet='All dilution final', startRow=2, cols=c(1:3, 6)) %>%
+  rename('library' = 'X1', 'replicate' = 'X2', 'gblock_estimate' = 'gblock.nM', 'benchmark_estimate'='X4') %>%
+  mutate(library=str_to_lower(library))
+
+pre_pcr_q
+```
+
+
+```{r}
+pos <- read_csv('pre_pcr_qPCR_positive_controls.csv') %>% 
+  mutate(method='gblock_estimate') 
+
+pos_control <- pre_pcr_q %>% filter(str_detect(library, '^positive')) %>% 
+  mutate(date='20250527_recalc') %>%
+  pivot_longer(cols=c('gblock_estimate', 'benchmark_estimate'), names_to='method', values_to='estimate') %>%
+  rbind(pos)
+
+ggplot(pos_control)+
+  geom_boxplot(aes(x=library, y=estimate))+
+  geom_point(aes(x=library, y=estimate, color=date, shape=replicate), position='jitter')+
+  scale_color_manual(values=c("20250527_recalc" = 'purple'))+
+  #scale_y_log10()+
+  theme_classic()
+```
+```{r}
+comparison <- pre_pcr_q %>%
+  pivot_longer(cols=c('gblock_estimate', 'benchmark_estimate'), names_to='method', values_to='estimate')
+  
+
+ggplot(comparison)+
+  geom_boxplot(aes(x=library, y=estimate, color=method), position=position_dodge2(width=0.5))+
+#  geom_point(aes(x=library, y=estimate, color=method), position=position_dodge2(width=0.5))+
+  theme_classic()
+
+pre_pcr_q %>%
+  ggplot()+
+  geom_point(aes(x=gblock_estimate, y=benchmark_estimate, color=library))+
+  geom_abline(intercept=0, slope=1)+
+  theme_classic()
+```
+
+
+```{r}
+lib_pos <- pre_pcr_q %>% filter(!str_detect(library, '^benchmark')) %>% subset(select=c(library, replicate, gblock_estimate))
+
+ggplot(lib_pos)+
+  geom_boxplot(aes(x=library, y=gblock_estimate))+
+  geom_point(aes(x=library, y=gblock_estimate, color=replicate))+
+  scale_color_manual(values=c('dilution 1' = 'lightblue', 
+                              'dilution 2' = 'lightblue', 
+                              'dilution 3' = 'lightblue', 
+                              'dilution 4' = 'darkblue', 
+                              'dilution 5' = 'darkblue', 
+                              'dilution 6' = 'darkblue'))+
+  ylim(0, 0.3)+
+  ylab('nM library estimate')+
+  xlab('')+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+
+
+```
+Dilution 1, 2, 3 are independent 1:10 dilutions, dilution 4, 5, 6 are independent 1:100 dilutions. Not huge difference in estimates! 
+
+```{r}
+lib_only <- pre_pcr_q %>% filter(str_detect(library, '^library')) %>% subset(select=c(library, replicate, gblock_estimate))
+
+est_pre_pcr <- lib_only %>% group_by(library) %>% 
+  summarize(estimate=mean(gblock_estimate), sd=sd(gblock_estimate))%>%
+  mutate(y_min = estimate-sd) %>%
+  mutate(y_max=estimate + sd)
+
+ggplot() +
+  geom_bar(est_pre_pcr, mapping=aes(x=library, y=estimate), stat='identity', alpha=0.5) +
+  geom_errorbar(est_pre_pcr, mapping=aes(x=library, ymin=y_min, ymax=y_max), width=0.4, alpha=0.9, position='dodge') +
+  geom_point(lib_pos, mapping=aes(x=library, y=gblock_estimate))+
+  ggtitle("Library Estimate (confidence intervals)")+
+  ylab('nM')+
+  theme_classic()
+
+metric_table <- est_pre_pcr %>% 
+  subset(select=c(library, estimate)) %>% 
+  rename('nM_qpcr_pre_pcr'='estimate') %>% 
+  mutate(library=str_to_lower(library)) %>%
+  merge(metric_table, on=library)
+```
+
+
+### Dilution Check  
+
+3 tubes were attempted, one was moved forward. What was the secondary estimate of that tube? 
+```{r}
+dilution_q <- read.xlsx("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\Library qPCR\\20250527_2 - frag update 0610 recalc.xlsx", sheet='Final Result', startRow=2, cols=c(1:4, 7)) %>%
+  rename('library' = 'X1', 'replicate' = 'X3', 'gblock_estimate' = 'gblock.nM', 'benchmark_estimate'='bench.nM') %>%
+  mutate(library=str_to_lower(library))
+
+dilution_q
+
+pos_control_2 <- dilution_q %>% filter(str_detect(library, '^positive')) %>% 
+  mutate(date='20250527_2_recalc') %>%
+  pivot_longer(cols=c('gblock_estimate', 'benchmark_estimate'), names_to='method', values_to='estimate') %>%
+  subset(select=-Tube)%>%
+  rbind(pos)
+
+ggplot(pos_control_2)+
+  geom_boxplot(aes(x=library, y=estimate))+
+  geom_point(aes(x=library, y=estimate, color=date, shape=replicate), position='jitter')+
+  scale_color_manual(values=c("20250527_2_recalc" = 'purple'))+
+  #scale_y_log10()+
+  theme_classic()
+```
+```{r}
+comparison_2 <- dilution_q %>%
+  pivot_longer(cols=c('gblock_estimate', 'benchmark_estimate'), names_to='method', values_to='estimate')
+  
+
+ggplot(comparison_2)+
+  geom_boxplot(aes(x=library, y=estimate, color=method), position=position_dodge2(width=0.5))+
+#  geom_point(aes(x=library, y=estimate, color=method), position=position_dodge2(width=0.5))+
+  theme_classic()
+
+dilution_q %>%
+  ggplot()+
+  geom_point(aes(x=gblock_estimate, y=benchmark_estimate, color=library))+
+  geom_abline(intercept=0, slope=1)+
+  theme_classic()
+```
+```{r}
+lib_dil <- dilution_q %>% 
+  filter(str_detect(library, '^library')) %>% 
+  subset(select=c(library, replicate, Tube, gblock_estimate, benchmark_estimate)) %>%
+  filter(Tube=='tube 1') %>% 
+  pivot_longer(cols=c(gblock_estimate, benchmark_estimate), names_to = 'method', values_to='estimate')
+
+ggplot(lib_dil)+
+  geom_hline(yintercept=0.01, color='grey')+
+  geom_hline(yintercept=0.012, color='grey', linetype=2)+
+  geom_hline(yintercept=0.008, color='grey', linetype=2)+
+  geom_boxplot(aes(x=library, y=estimate, color=method))+
+  geom_point(aes(x=library, y=estimate, color=method, shape=replicate), position=position_dodge(width=0.6))+
+  ylim(0, 0.02)+
+  ylab('nM dilution estimate')+
+  xlab('')+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))+
+  labs(title='nM estimate of Tube 1')
+```
+```{r}
+df_tbl <- data.frame(library=c('library 1', 'library 2', 'library 3', 'library 4', 'library 5', 'library 6', 'library 7', 'library 8', 'library 9'), df=c(13.76, 12.07, 14.87, 13.18, 11.38, 9.11, 9.40, 10.89, 4.47))
+
+dil_est <- dilution_q %>% 
+  filter(str_detect(library, '^library')) %>% 
+  subset(select=c(library, replicate, Tube, gblock_estimate, benchmark_estimate)) %>%
+  pivot_longer(cols=c(gblock_estimate, benchmark_estimate), names_to = 'method', values_to='estimate') %>%
+  merge(df_tbl, on=library) %>% 
+  mutate(lib_est=estimate*df) %>% 
+  mutate(date='20250527_2') %>%
+  subset(select=c(library, replicate, method, lib_est, date))
+
+dil_comp <- pre_pcr_q %>% filter(str_detect(library, '^library')) %>%
+  pivot_longer(cols=c(gblock_estimate, benchmark_estimate), names_to = 'method', values_to='lib_est') %>%
+  mutate(date='20250527') %>%
+  rbind(dil_est)
+
+dil_comp %>%
+ # filter(method=='gblock_estimate') %>%
+  ggplot()+
+  geom_boxplot(aes(x=library, y=lib_est, color=date), position=position_dodge(width = 0.6))+
+  geom_point(aes(x=library, y=lib_est, color=date), position=position_dodge(width = 0.6))+
+  theme_classic()+
+  ylim(0, 0.25)+
+  facet_wrap(~method)
+```
+```{r}
+dil_estimate <- lib_dil %>% 
+  filter(method=='gblock_estimate') %>% 
+  group_by(library) %>% 
+  summarize(estimate=mean(estimate))
+
+metric_table <- dil_estimate %>%  
+   subset(select=c(library, estimate)) %>% 
+   rename('nM_qpcr_dilution'='estimate') %>% 
+   merge(metric_table, on=library)
+```
+
+
+Both are bad! Lol. Whatever. 
+
+### Post-PCR 
+```{r}
+post_pcr_q_1 <- read.xlsx("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\Library qPCR\\20250604.xlsx", sheet='Final Result', startRow=2, cols=c(1:3)) %>%
+  rename('library' = 'X1', 'replicate' = 'X2', 'gblock_estimate' = 'gblock.nM') %>%
+  mutate(library=str_to_lower(library)) %>%
+  mutate(date='20250604')
+
+post_pcr_q_2 <- read.xlsx("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\Library qPCR\\20250606.xlsx", sheet='Final Result', startRow=2, cols=c(1:3)) %>%
+  rename('library' = 'X1', 'replicate' = 'X2', 'gblock_estimate' = 'nM.0606') %>%
+  mutate(library=str_to_lower(library))%>%
+  mutate(date='20250606')
+
+post_pcr_q <- rbind(post_pcr_q_1, post_pcr_q_2)
+```
+
+```{r}
+final_estimate <- data.frame(library=c('library 1', 'library 2', 'library 3', 'library 4', 'library 5', 'library 6', 'library 7', 'library 8', 'library 9'), 
+                             nM_qpcr_post_pcr = c(10.214, 8.361, 4.495, 11.673, 15.715, 5.412, 10.908, 17.345, 7.524))
+
+post_pcr_q %>%
+  filter(str_detect(library, '^library'))%>%
+  ggplot(aes(x=library, y=gblock_estimate))+
+  geom_boxplot(aes(x=library, y=gblock_estimate, color=date))+
+  geom_point(aes(x=library, y=gblock_estimate, color=date, shape=replicate), position=position_dodge(width=0.6))+
+  geom_point(data=final_estimate, aes(x=library, y=nM_qpcr_post_pcr), color='black', size=2)+
+  ylab('nM dilution estimate')+
+  xlab('')+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))+
+  labs(title='nM estimates post-pcr')
+```
+## Summary 
+
+All of the metrics of this library: 
+```{r}
+metric_table <- final_estimate %>%  
+   merge(metric_table, on=library)
+metric_table
+```
+
