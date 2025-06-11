@@ -1,5 +1,5 @@
 ---
-title: "E19.12_qc_library_prep"
+title: "E19.12_qc_library_prep_archive"
 author: "Chandler Sutherland"
 date: "2025-05-14"
 output: html_document
@@ -19,7 +19,7 @@ library(ggbeeswarm)
 
 Copyright © Chandler Sutherland Email: [chandlersutherland\@berkeley.edu](mailto:chandlersutherland@berkeley.edu){.email}
 
-Purpose: produce a custom QC report for the E19.12 experiment. 
+Purpose: produce a custom QC report for the E19.12 experiment. Ended up being a qPCR troubleshooting experiment, see E19.12_qc_library_prep_final for actual QC 
 
 ## put back in yield info 
 
@@ -79,12 +79,6 @@ pre_pcr <- ggplot() +
   facet_wrap(~genotype)
 
 pre_pcr
-```
-
-
-Fragment Sizes:
-```{r}
-frag_traces_1 %>% filter(size > 100 & size <=1000) 
 ```
 
 
@@ -559,12 +553,12 @@ benchmark_raw <- raw %>%
   subset(select=c(sample, Average.Ct, dilution.factor)) %>% 
   unique() %>% 
   separate(sample, into=c(NA, 'benchmark', NA, 'replicate'), sep=' ') %>%
-  mutate(ideal_nM = case_when(benchmark == '1' ~ 0.1, 
-                              benchmark == '2' ~ 0.04, 
-                              benchmark == '3' ~ 0.02, 
-                              benchmark == '4' ~ 0.01, 
-                              benchmark == '5' ~ 0.005, 
-                              benchmark == '6' ~ 0.0095)) %>% 
+  filter(benchmark != '6') %>% 
+  mutate(ideal_nM = case_when(benchmark == '1' ~ 0.10236, 
+                              benchmark == '2' ~ 0.0565, 
+                              benchmark == '3' ~ 0.035209, 
+                              benchmark == '4' ~ 0.0126, 
+                              benchmark == '5' ~ 0.0078412)) %>% 
   mutate(log_pM = log10(ideal_nM/dilution.factor*1000))
 
 model_20250527 <- lm(Average.Ct~log_pM, benchmark_raw)
@@ -592,12 +586,12 @@ benchmark_raw_2 <- raw_2 %>%
   subset(select=c(sample, Average.Ct, dilution.factor)) %>% 
   unique() %>% 
   separate(sample, into=c(NA, 'benchmark', NA, 'replicate'), sep=' ') %>%
-  mutate(ideal_nM = case_when(benchmark == '1' ~ 0.1, 
-                              benchmark == '2' ~ 0.04, 
-                              benchmark == '3' ~ 0.02, 
-                              benchmark == '4' ~ 0.01, 
-                              benchmark == '5' ~ 0.005, 
-                              benchmark == '6' ~ 0.0095)) %>% 
+  filter(benchmark != '6') %>% 
+  mutate(ideal_nM = case_when(benchmark == '1' ~ 0.10236, 
+                              benchmark == '2' ~ 0.0565, 
+                              benchmark == '3' ~ 0.035209, 
+                              benchmark == '4' ~ 0.0126, 
+                              benchmark == '5' ~ 0.0078412)) %>% 
   mutate(log_pM = log10(ideal_nM/dilution.factor*1000))
 
 
@@ -758,4 +752,210 @@ comparison%>%
   summarize(factor=mean(factor))
 ```
 
-For both benchmark and gblock, nonlinearity. Oh well! Continue with standards, as that is what everything is relative to, and technically smaller overestimation factor than benchmark. Very consistent with overestimation factor 
+For both benchmark and gblock, nonlinearity. Oh well! Continue with standards, as that is what everything is relative to, and technically smaller overestimation factor than benchmark. Very consistent with overestimation factor. 
+
+```{r}
+df_tbl <- data.frame(library=c('library 1', 'library 2', 'library 3', 'library 4', 'library 5', 'library 6', 'library 7', 'library 8', 'library 9'), 
+                     tub1_df=c(13.76, 12.07, 14.87, 13.18, 11.38, 9.11, 9.40, 10.89, 4.47), 
+                     tub2_df=c(10.32, 9.05, 11.15, 9.88, 8.53, 6.83, 7.05, 8.17, 3.35), 
+                     tub3_df=c(8.25, 7.24, 8.92, 7.91, 6.83, 5.47, 5.64, 6.53, 2.68)) %>% pivot_longer(cols=c(2:4), values_to = 'df', names_to='Tube') %>%
+  mutate(Tube=case_when(Tube == 'tub1_df' ~ 'tube 1', 
+                        Tube == 'tub2_df' ~ 'tube 2', 
+                        Tube == 'tub3_df' ~ 'tube 3'))
+
+raw_2 %>% 
+  subset(select=c(sample, Average.Ct, m, b, pMol.calc, dilution.factor, `nM.(fmol/uL)`, fragment.size)) %>% 
+  mutate(date='20250527_2')%>%
+  separate(sample, into=c('X1', 'X2', 'X3', 'X4')) %>%
+  mutate(library=paste(X1, X2))%>%
+  mutate(Tube=case_when(X4 %in% c('1', '4') ~ 'tube 1', 
+                        X4 %in% c('2', '5') ~ 'tube 2', 
+                        X4 %in% c('3', '6') ~ 'tube 3')) %>% 
+  merge(df_tbl, on=c(library, Tube)) %>%
+  mutate(dilution.factor=dilution.factor*df) %>%
+  mutate(calc_nM = pMol.calc*dilution.factor*479/fragment.size/1000) %>% ggplot()+
+  geom_point(aes(x=dilution.factor, y=calc_nM, color=library, group=library))+
+  geom_line(aes(x=dilution.factor, y=calc_nM, color=library, group=library))+
+  theme_classic()+
+  scale_x_log10()
+```
+
+
+# Fragment Analysis 2 
+```{r}
+#load data 
+run_1 <- read_csv("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\fragment analysis\\20250603 pre pcr 2\\2025 06 02 15H 25M Electropherogram.csv") %>%
+  pivot_longer(cols=c(`H5: CS39`,`H6: CS43`), names_to='sample', values_to='Intensity') 
+
+run_2 <- read_csv("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\fragment analysis\\20250603 pre pcr 2\\2025 06 02 14H 20M Electropherogram.csv") %>%
+  pivot_longer(cols=c(`G9: CS35`,`G11: CS42`), names_to='sample', values_to='Intensity') 
+
+run_3 <- read_csv("C:\\Users\\chand\\Box Sync\\Krasileva_Lab\\Research\\chandler\\Krasileva Lab\\E19\\fragment analysis\\20250603 pre pcr 2\\2025 06 02 11H 53M Electropherogram.csv") %>%
+  pivot_longer(cols=`E6: CS36`:`E11: CS41`, names_to='sample', values_to='Intensity') 
+
+
+frag_traces_2 <- rbind(run_1, run_2, run_3) %>% 
+  separate('sample', c(NA, 'sample_number')) %>% 
+  rename(size = `Size (bp)`) %>% 
+  mutate(Library=case_when(sample_number=='CS35' ~ 'Library 1', 
+                            sample_number=='CS36' ~ 'Library 2',
+                            sample_number=='CS37' ~ 'Library 3', 
+                            sample_number=='CS38' ~ 'Library 4', 
+                            sample_number=='CS39' ~ 'Library 5', 
+                            sample_number=='CS40' ~ 'Library 6', 
+                            sample_number=='CS41' ~ 'Library 7', 
+                            sample_number=='CS42' ~ 'Library 8', 
+                            sample_number=='CS43' ~ 'Library 9'
+                            ))%>%
+  mutate(plant_id=case_when(sample_number=='CS35' ~ 'Col0_7', 
+                            sample_number=='CS36' ~ 'Col0_9',
+                            sample_number=='CS37' ~ 'Col0_10', 
+                            sample_number=='CS38' ~ 'msh2_2', 
+                            sample_number=='CS39' ~ 'msh2_4', 
+                            sample_number=='CS40' ~ 'msh2_7', 
+                            sample_number=='CS41' ~ 'uni1d_1', 
+                            sample_number=='CS42' ~ 'uni1d_2', 
+                            sample_number=='CS43' ~ 'uni1d_3'
+                            )) %>%
+  separate(plant_id, sep='_', into=c('genotype', NA), remove=FALSE)
+
+frag_traces_2$plant_id <- as.factor(frag_traces_2$plant_id)
+
+pre_pcr_2 <- ggplot() +
+  geom_line(data=frag_traces_2, aes(x=size, y= Intensity, color=plant_id))+
+  scale_x_log10(limits=c(10,NA), breaks=c(10, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
+  ylim(0, 2000)+
+  theme_classic()+
+  geom_vline(xintercept=200, linetype=2, color='grey')+
+  geom_vline(xintercept=1000, linetype=2, color='grey')+
+  facet_wrap(~genotype)
+
+pre_pcr_2
+
+```
+
+```{r}
+frag_comp <- frag_traces_1 %>% 
+  mutate(date='20250514') %>% 
+  rename('Library'='sample') %>% 
+  subset(select=-number) %>% 
+  rbind(frag_traces_2 %>% mutate(date='20250602')) %>%
+  mutate(run_id = paste(plant_id, date))
+
+frag_comp %>%
+  ggplot()+
+  geom_line(mapping=aes(x=size, y=Intensity, color=run_id))+
+  scale_x_log10(limits=c(10,NA), breaks=c(10, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
+  ylim(0, 2000)+
+  scale_color_manual(values=c('grey', 'red', 'grey', 'red', 'grey', 'red',
+                              'grey', 'red', 'grey', 'red', 'grey', 'red',
+                              'grey', 'red', 'grey', 'red', 'grey', 'red'))+
+  theme_classic()+
+  geom_vline(xintercept=200, linetype=2, color='grey')+
+  geom_vline(xintercept=1000, linetype=2, color='grey')
+
+frag_comp %>%
+  ggplot()+
+  geom_line(mapping=aes(x=size, y=Intensity, color=run_id))+
+  scale_x_log10(limits=c(10,NA), breaks=c(10, 100, 200, 300, 400,500, 600, 700, 800, 1000, 1500,3000,6000))+
+  ylim(0, 2000)+
+  scale_color_manual(values=c('grey', 'red', 'grey', 'red', 'grey', 'red',
+                              'grey', 'red', 'grey', 'red', 'grey', 'red',
+                              'grey', 'red', 'grey', 'red', 'grey', 'red'))+
+  theme_classic()+
+  geom_vline(xintercept=200, linetype=2, color='grey')+
+  geom_vline(xintercept=1000, linetype=2, color='grey')+
+  facet_wrap(~genotype)
+```
+NICE
+
+CS35	Library 1	474
+CS36	Library 2	405
+CS37	Library 3	463
+CS38	Library 4	412
+CS39	Library 5	401
+CS40	Library 6	428
+CS41	Library 7	475
+CS42	Library 8	389
+CS43	Library 9	383
+
+Adjust dilution estimate based on these library sizes 
+```{r}
+
+#frag_traces_2 %>% filter(size>= 200 & size <= 1000) %>% 
+#  group_by(plant_id) %>% 
+#  filter(Intensity==max(Intensity))%>%
+#  ungroup() %>%
+#  subset(select=c(Library, plant_id, sample_number, size)) %>%
+#  arrange(Library)
+
+#for consistency, use the fgl calculated frag size 
+
+avg_size <- data.frame(library=c('Library 1', 'Library 2', 'Library 3', 'Library 4', 'Library 5', 'Library 6', 'Library 7', 'Library 8', 'Library 9'), 
+                       frag_size=c(474, 405, 463, 412, 401, 428, 475, 389, 383))
+
+upd_dilution <- dilution  %>% merge(avg_size, on=library) %>% 
+  mutate(new_estimate=estimate*fragment.size/frag_size)
+
+upd_nM <- ggplot(upd_dilution)+
+  geom_hline(yintercept=0.01, color='#00BA38')+
+  geom_hline(yintercept=0.0075, color='#F8766D')+
+  geom_hline(yintercept=0.0125, color='#619CFF')+
+  geom_boxplot(aes(x=library, y=estimate, color=Tube))+
+  theme_classic()+
+  ylim(0, 0.03)+
+  xlab('')+
+  ylab('working concentration (nM)')+
+  labs(title=' gblock standard frag updated')
+
+upd_summary <- upd_dilution %>% group_by(library, Tube) %>% summarize(new_estimate=mean(new_estimate, na.rm=T)) %>% mutate(fmol=new_estimate*20)
+
+upd_fmol <- ggplot(upd_summary)+
+  geom_hline(yintercept=0.2, color='red')+
+  geom_hline(yintercept=0.18, color='red', linetype=2)+ #lower bound conservative estimate
+  geom_hline(yintercept=0.22, color='red', linetype=2)+ #upper bound empirical estimate 
+  geom_point(aes(x=library, y=fmol, color=Tube))+
+  ylim(0, 0.5)+
+  theme_classic()+
+  xlab('')+
+  ylab('fmol input to PCR in 20ul')+
+  labs(title='gblock standard frag updated')
+
+upd_nM + upd_fmol + plot_layout(guides='collect')
+```
+And with benchmark standards 
+```{r}
+s_lib_comp_dilutions 
+
+both_sizes <- upd_dilution %>% subset(select=c(library, fragment.size, frag_size)) %>% unique() %>% mutate(library=str_to_lower(library)) 
+
+upd_bench_dil <- s_lib_comp_dilutions %>% merge(both_sizes, on=library) %>%
+  mutate(new_bench_estimate=bench_calc_nM*fragment.size/frag_size)
+
+upd_nM_2 <- ggplot(upd_bench_dil)+
+  geom_hline(yintercept=0.01, color='#00BA38')+
+  geom_hline(yintercept=0.0075, color='#F8766D')+
+  geom_hline(yintercept=0.0125, color='#619CFF')+
+  geom_boxplot(aes(x=library, y=new_bench_estimate, color=Tube))+
+  theme_classic()+
+  ylim(0, 0.03)+
+  xlab('')+
+  ylab('working concentration (nM)')+
+  labs(title='benchmark standard frag updated')
+
+upd_summary_2 <- upd_bench_dil %>% group_by(library, Tube) %>% summarize(new_bench_estimate=mean(new_bench_estimate, na.rm=T)) %>% mutate(fmol=new_bench_estimate*20)
+
+upd_fmol_2 <- ggplot(upd_summary_2)+
+  geom_hline(yintercept=0.2, color='red')+
+  geom_hline(yintercept=0.18, color='red', linetype=2)+ #lower bound conservative estimate
+  geom_hline(yintercept=0.22, color='red', linetype=2)+ #upper bound empirical estimate 
+  geom_point(aes(x=library, y=fmol, color=Tube))+
+  ylim(0, 0.5)+
+  theme_classic()+
+  xlab('')+
+  ylab('fmol input to PCR in 20ul')+
+  labs(title='benchmark standard frag updated')
+
+upd_nM_2 + upd_fmol_2 + plot_layout(guides='collect')
+```
+This is so complicated!!!!!
